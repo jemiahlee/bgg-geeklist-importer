@@ -1,0 +1,7 @@
+node_modules/
+storage-state.json
+items.csv
+boilerplate.txt
+skipped.csv
+dry-run-*.png
+*.local.csv

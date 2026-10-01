@@ -1,0 +1,4 @@
+Condition: {{condition}}
+Price: ${{price}}
+
+{{boilerplate}}
