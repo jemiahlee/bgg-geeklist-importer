@@ -61,3 +61,12 @@ items to behave like a normal user, not a scraper.
 - `--limit N` — only process the first N rows (good for testing).
 - `--delay-ms N` — base delay between items in milliseconds (default 4000, jittered).
 - `--template <path>` / `--boilerplate <path>` / `--csv <path>` — override file locations.
+- `--check-prices` — after you pick the right game, looks up pricing data and lets
+  you confirm or override the CSV price before it's used:
+  - BGG's own GeekMarket Price History (actual recent sales, filtered to USD),
+    shown overall and, if the CSV `condition` matches one of BGG's standard
+    condition labels (New, Like New, Very Good, Good, Acceptable), broken out
+    for that condition specifically.
+  - BoardGameOracle's lowest current new/retail price, as a reference ceiling.
+  You get a prompt with a suggested default (the condition-matched median sale
+  price when available) that you can accept or type over.

@@ -1,11 +1,19 @@
 import { chromium } from "playwright";
 import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
-import { select, confirm } from "@inquirer/prompts";
+import { select, confirm, input } from "@inquirer/prompts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STORAGE_STATE_PATH } from "./config.mjs";
+import {
+  searchBggCandidates,
+  matchBggId,
+  getBggRecentSales,
+  summarizeRecentSales,
+  searchBoardGameOracle,
+  matchOracleItem,
+} from "./pricing.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -20,6 +28,7 @@ function parseArgs() {
     live: false,
     limit: Infinity,
     delayMs: 4000,
+    checkPrices: false,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -30,6 +39,7 @@ function parseArgs() {
     else if (a === "--live") opts.live = true;
     else if (a === "--limit") opts.limit = parseInt(args[++i], 10);
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
+    else if (a === "--check-prices") opts.checkPrices = true;
     else {
       console.error(`Unknown argument: ${a}`);
       process.exit(1);
@@ -57,6 +67,61 @@ function renderBody(template, row, boilerplate) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function checkPrice(page, context, row, chosenLabel) {
+  console.log(`  Looking up pricing data for "${chosenLabel}"...`);
+
+  const candidates = await searchBggCandidates(page, row.game);
+  const matched = matchBggId(candidates, chosenLabel);
+
+  let salesSummary = null;
+  if (matched) {
+    const sales = await getBggRecentSales(context, matched.id, { limit: 15 });
+    salesSummary = summarizeRecentSales(sales, row.condition);
+  } else {
+    console.log(`  Could not resolve a BGG id for "${chosenLabel}" — skipping recent sales lookup.`);
+  }
+
+  const nameYearMatch = chosenLabel.match(/^(.*?)\s*\((\d{4})\)\s*$/);
+  let oracleMatch = null;
+  if (nameYearMatch) {
+    const [, name, year] = nameYearMatch;
+    const oracleItems = await searchBoardGameOracle(row.game);
+    oracleMatch = matchOracleItem(oracleItems, name.trim(), Number(year));
+  }
+
+  console.log(`  --- Pricing for "${chosenLabel}" ---`);
+  if (salesSummary?.overall) {
+    const { count, min, max, median: med } = salesSummary.overall;
+    console.log(`  BGG recent sales (USD, last ${count}): $${min.toFixed(2)}–$${max.toFixed(2)}, median $${med.toFixed(2)}`);
+    if (salesSummary.matchedLabel) {
+      if (salesSummary.byCondition) {
+        const c = salesSummary.byCondition;
+        console.log(
+          `    "${salesSummary.matchedLabel}" condition (${c.count}): $${c.min.toFixed(2)}–$${c.max.toFixed(2)}, median $${c.median.toFixed(2)}`
+        );
+      } else {
+        console.log(`    No recent "${salesSummary.matchedLabel}" condition sales in this sample.`);
+      }
+    }
+  } else {
+    console.log(`  BGG recent sales: no data found.`);
+  }
+  if (oracleMatch) {
+    console.log(
+      `  BoardGameOracle lowest new price: $${oracleMatch.lowest_price.price.toFixed(2)} (${oracleMatch.lowest_price.merchantShortName}, ${oracleMatch.prices_count} listing(s))`
+    );
+  } else {
+    console.log(`  BoardGameOracle: no match found.`);
+  }
+
+  const suggested = salesSummary?.byCondition?.median ?? salesSummary?.overall?.median ?? row.price;
+
+  return input({
+    message: `  Price to use for this listing (CSV had ${row.price})`,
+    default: String(suggested),
+  });
 }
 
 async function main() {
@@ -135,13 +200,13 @@ async function main() {
       continue;
     }
 
+    const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
     let chosenIndex = 0;
     if (options.length > 1) {
-      const texts = await Promise.all(options.map((o) => o.textContent()));
       chosenIndex = await select({
         message: `Multiple BGG matches for "${row.game}" — pick the right one:`,
         choices: [
-          ...texts.map((t, idx) => ({ name: t.trim(), value: idx })),
+          ...optionTexts.map((t, idx) => ({ name: t, value: idx })),
           { name: "(skip this row)", value: -1 },
         ],
       });
@@ -153,6 +218,12 @@ async function main() {
         continue;
       }
     }
+    const chosenLabel = optionTexts[chosenIndex];
+
+    let effectiveRow = row;
+    if (opts.checkPrices) {
+      effectiveRow = { ...row, price: await checkPrice(page, context, row, chosenLabel) };
+    }
 
     await options[chosenIndex].click();
     const continueBtn = await page.waitForSelector("button:has-text('Continue')");
@@ -160,7 +231,7 @@ async function main() {
 
     await page.waitForSelector("gg-geeklist-item-edit-new");
     const textarea = await page.waitForSelector("gg-geeklist-item-edit-new textarea[name='text']");
-    const body = renderBody(template, row, boilerplate);
+    const body = renderBody(template, effectiveRow, boilerplate);
     await textarea.fill(body);
 
     if (opts.live) {
