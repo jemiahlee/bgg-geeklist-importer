@@ -234,6 +234,9 @@ async function main() {
     const body = renderBody(template, effectiveRow, boilerplate);
     await textarea.fill(body);
 
+    const subscribeCheckbox = await page.waitForSelector("gg-geeklist-item-edit-new input[name='subs']");
+    await subscribeCheckbox.check();
+
     if (opts.live) {
       const saveBtn = await page.$("gg-geeklist-item-edit-new button:has-text('Save')");
       await saveBtn.click();
