@@ -13,6 +13,8 @@ import {
   summarizeRecentSales,
   searchBoardGameOracle,
   matchOracleItem,
+  searchNobleKnight,
+  matchNobleKnightItems,
 } from "./pricing.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,10 +87,13 @@ async function checkPrice(page, context, row, chosenLabel) {
 
   const nameYearMatch = chosenLabel.match(/^(.*?)\s*\((\d{4})\)\s*$/);
   let oracleMatch = null;
+  let nobleKnightMatches = [];
   if (nameYearMatch) {
     const [, name, year] = nameYearMatch;
     const oracleItems = await searchBoardGameOracle(row.game);
     oracleMatch = matchOracleItem(oracleItems, name.trim(), Number(year));
+    const nobleKnightItems = await searchNobleKnight(name.trim());
+    nobleKnightMatches = matchNobleKnightItems(nobleKnightItems, name.trim());
   }
 
   console.log(`  --- Pricing for "${chosenLabel}" ---`);
@@ -114,6 +119,14 @@ async function checkPrice(page, context, row, chosenLabel) {
     );
   } else {
     console.log(`  BoardGameOracle: no match found.`);
+  }
+  if (nobleKnightMatches.length > 0) {
+    console.log(`  Noble Knight Games in-stock listings (${nobleKnightMatches.length}), cheapest first:`);
+    for (const item of nobleKnightMatches.slice(0, 3)) {
+      console.log(`    $${item.price.toFixed(2)} ${item.condition} — ${item.title}`);
+    }
+  } else {
+    console.log(`  Noble Knight Games: no match found.`);
   }
 
   const suggested = salesSummary?.byCondition?.median ?? salesSummary?.overall?.median ?? row.price;

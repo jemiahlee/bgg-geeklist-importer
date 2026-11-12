@@ -111,3 +111,55 @@ export function matchOracleItem(items, name, year) {
     null
   );
 }
+
+// Noble Knight Games sells new and used games, so its in-stock listings are a
+// good comparable for secondhand prices. The site's own /Search page renders
+// no results without its Zoovu search widget, so this calls the same Zoovu API
+// the widget does (no auth needed). Each result is one in-stock copy, with its
+// price and condition exposed as "dataPoints".
+export async function searchNobleKnight(query) {
+  const url = `https://api.search.zoovu.com/search?projectId=43167&site=43167&device=desktop&limit=50&query=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  if (!res.ok) return [];
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    return [];
+  }
+  const products = data.searchResults?.find((r) => r.type === "products");
+  return (products?.results ?? []).flat().flatMap((item) => {
+    const points = Object.fromEntries((item.dataPoints ?? []).map((p) => [p.key, p.value]));
+    const price = Number.parseFloat(points.Price);
+    if (Number.isNaN(price) || item.sxCategoryId !== "BOARD_GAME") return [];
+    return [
+      {
+        title: item.name,
+        price,
+        condition: points.Condition ?? "",
+        productType: points["Product Types"] ?? "",
+        url: `https://www.nobleknight.com${item.link}`,
+      },
+    ];
+  });
+}
+
+function normalizeTitle(s) {
+  return s
+    .toLowerCase()
+    .replaceAll("&", "and")
+    .replace(/[:–-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Noble Knight titles are the game's name plus an optional suffix such as
+// "(1st Printing)" or "w/Swift Start Pack". Anything else after the name
+// ("Catan Junior", "Wingspan Dice Tower") is a different product.
+// Returns matching boxed games, cheapest first.
+export function matchNobleKnightItems(items, name) {
+  const pattern = new RegExp(`^${normalizeTitle(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s*\\(.*\\)|\\s+w/.*)?$`);
+  return items
+    .filter((i) => i.productType === "Boxed Game" && pattern.test(normalizeTitle(i.title)))
+    .sort((a, b) => a.price - b.price);
+}

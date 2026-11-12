@@ -68,5 +68,8 @@ items to behave like a normal user, not a scraper.
     condition labels (New, Like New, Very Good, Good, Acceptable), broken out
     for that condition specifically.
   - BoardGameOracle's lowest current new/retail price, as a reference ceiling.
+  - Noble Knight Games' cheapest in-stock listings (new and used, with their
+    condition grades) for the game. Expansions and oddly titled products may
+    not match and will show "no match found".
   You get a prompt with a suggested default (the condition-matched median sale
   price when available) that you can accept or type over.
