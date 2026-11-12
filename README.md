@@ -41,8 +41,8 @@ By default nothing is posted: for each row it opens the Add Item form, searches
 BGG, fills in the body, screenshots the filled-in form to `dry-run-N.png`, then
 cancels. Review the screenshots before going live.
 
-If a game name matches more than one BGG entry, you'll get an interactive prompt in
-the terminal to pick the right one (or skip the row). Rows with no BGG match, or
+If a game name matches more than one BGG entry, the terminal lists each match with its
+BGG link, then prompts you to pick the right one (or skip the row). Rows with no BGG match, or
 that you skip, are written to `skipped.csv` for manual follow-up.
 
 ## 4. Post for real

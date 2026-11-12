@@ -223,6 +223,12 @@ async function main() {
     const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
     let chosenIndex = 0;
     if (options.length > 1) {
+      const candidates = await searchBggCandidates(page, row.game);
+      console.log(`  Matches for "${row.game}":`);
+      for (const t of optionTexts) {
+        const id = matchBggId(candidates, t)?.id;
+        console.log(`    ${t}${id ? ` — https://boardgamegeek.com/boardgame/${id}` : ""}`);
+      }
       chosenIndex = await select({
         message: `Multiple BGG matches for "${row.game}" — pick the right one:`,
         choices: [
