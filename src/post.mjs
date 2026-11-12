@@ -33,6 +33,7 @@ function parseArgs() {
     limit: Infinity,
     delayMs: 4000,
     checkPrices: false,
+    skipPosted: false,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -44,6 +45,7 @@ function parseArgs() {
     else if (a === "--live") opts.live = true;
     else if (a === "--limit") opts.limit = parseInt(args[++i], 10);
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
+    else if (a === "--skip-posted") opts.skipPosted = true;
     else if (a === "--check-prices") opts.checkPrices = true;
     else {
       console.error(`Unknown argument: ${a}`);
@@ -240,11 +242,19 @@ async function main() {
 
     const prior = findPosted(history, opts.geeklist, chosenLabel);
     if (prior) {
-      const again = await confirm({
-        message: `"${chosenLabel}" was already posted to this geeklist on ${prior.postedAt.slice(0, 10)}${prior.price ? ` at $${prior.price}` : ""}. Post it again?`,
-        default: false,
-      });
-      if (!again) {
+      let action = "skip";
+      if (!opts.skipPosted) {
+        action = await select({
+          message: `"${chosenLabel}" was already posted to this geeklist on ${prior.postedAt.slice(0, 10)}${prior.price ? ` at $${prior.price}` : ""}.`,
+          choices: [
+            { name: "Skip it", value: "skip" },
+            { name: "Skip it and all other previously posted items this run", value: "skip-all" },
+            { name: "Post it again", value: "post" },
+          ],
+        });
+        if (action === "skip-all") opts.skipPosted = true;
+      }
+      if (action !== "post") {
         console.log(`  Skipped: already posted.`);
         const cancelBtn = await page.$("button:has-text('Cancel')");
         if (cancelBtn) await cancelBtn.click();

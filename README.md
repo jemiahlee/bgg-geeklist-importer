@@ -59,12 +59,15 @@ items to behave like a normal user, not a scraper.
 
 Every item posted with `--live` is recorded in `posted.json` (gitignored), keyed by
 geeklist and the BGG item you picked. If a later run reaches an item that was already
-posted to the same geeklist, you're told when it was posted and asked whether to post
-it again (default: no, skip). Dry runs never write to the ledger. Delete an entry from
+posted to the same geeklist, you're told when it was posted and can skip it, skip it
+and every other previously posted item for the rest of the run, or post it again. Pass
+`--skip-posted` to skip them all without being asked, so the same CSV can be re-run
+as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to the ledger. Delete an entry from
 `posted.json` (or the whole file) to forget it.
 
 ## Other flags
 
+- `--skip-posted` — silently skip items already in the ledger (see above).
 - `--history <path>` — ledger file location (default `posted.json`).
 - `--geeklist <url>` — defaults to the Portland flea market v2.0 list.
 - `--limit N` — only process the first N rows (good for testing).
