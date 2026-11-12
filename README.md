@@ -73,7 +73,8 @@ as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to t
 - `--limit N` — only process the first N rows (good for testing).
 - `--delay-ms N` — base delay between items in milliseconds (default 4000, jittered).
 - `--template <path>` / `--boilerplate <path>` / `--csv <path>` — override file locations.
-- `--check-prices` — after you pick the right game, looks up pricing data and lets
+- `--no-check-prices` — skip the price lookup and use the CSV price as-is. By default,
+  after you pick the right game, the importer looks up pricing data and lets
   you confirm or override the CSV price before it's used:
   - BGG's own GeekMarket Price History (actual recent sales, filtered to USD),
     shown overall and, if the CSV `condition` matches one of BGG's standard

@@ -32,7 +32,7 @@ function parseArgs() {
     live: false,
     limit: Infinity,
     delayMs: 4000,
-    checkPrices: false,
+    checkPrices: true,
     skipPosted: false,
   };
   for (let i = 0; i < args.length; i++) {
@@ -46,7 +46,7 @@ function parseArgs() {
     else if (a === "--limit") opts.limit = parseInt(args[++i], 10);
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
     else if (a === "--skip-posted") opts.skipPosted = true;
-    else if (a === "--check-prices") opts.checkPrices = true;
+    else if (a === "--no-check-prices") opts.checkPrices = false;
     else {
       console.error(`Unknown argument: ${a}`);
       process.exit(1);
