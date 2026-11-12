@@ -55,8 +55,17 @@ Same as above, but actually clicks Save for each item and asks for a final
 confirmation before starting. Runs with a few seconds of randomized delay between
 items to behave like a normal user, not a scraper.
 
+## Duplicate protection
+
+Every item posted with `--live` is recorded in `posted.json` (gitignored), keyed by
+geeklist and the BGG item you picked. If a later run reaches an item that was already
+posted to the same geeklist, you're told when it was posted and asked whether to post
+it again (default: no, skip). Dry runs never write to the ledger. Delete an entry from
+`posted.json` (or the whole file) to forget it.
+
 ## Other flags
 
+- `--history <path>` — ledger file location (default `posted.json`).
 - `--geeklist <url>` — defaults to the Portland flea market v2.0 list.
 - `--limit N` — only process the first N rows (good for testing).
 - `--delay-ms N` — base delay between items in milliseconds (default 4000, jittered).

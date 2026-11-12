@@ -16,6 +16,7 @@ import {
   searchNobleKnight,
   matchNobleKnightItems,
 } from "./pricing.mjs";
+import { loadHistory, findPosted, recordPosted } from "./history.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -26,6 +27,7 @@ function parseArgs() {
     csv: path.join(ROOT, "items.csv"),
     boilerplate: path.join(ROOT, "boilerplate.txt"),
     template: path.join(ROOT, "template.txt"),
+    history: path.join(ROOT, "posted.json"),
     geeklist: "https://boardgamegeek.com/geeklist/343300/portland-or-area-virtual-flea-market-v20",
     live: false,
     limit: Infinity,
@@ -37,6 +39,7 @@ function parseArgs() {
     if (a === "--csv") opts.csv = path.resolve(args[++i]);
     else if (a === "--boilerplate") opts.boilerplate = path.resolve(args[++i]);
     else if (a === "--template") opts.template = path.resolve(args[++i]);
+    else if (a === "--history") opts.history = path.resolve(args[++i]);
     else if (a === "--geeklist") opts.geeklist = args[++i];
     else if (a === "--live") opts.live = true;
     else if (a === "--limit") opts.limit = parseInt(args[++i], 10);
@@ -153,6 +156,8 @@ async function main() {
   const boilerplate = readOptional(opts.boilerplate);
   const template = readOptional(opts.template, DEFAULT_TEMPLATE);
 
+  const history = loadHistory(opts.history);
+
   const limited = rows.slice(0, opts.limit);
   console.log(`Loaded ${rows.length} row(s) from ${opts.csv}${opts.limit < rows.length ? `, processing first ${limited.length}` : ""}.`);
   console.log(opts.live ? "Mode: LIVE — items will actually be posted." : "Mode: DRY RUN — items are filled in and then cancelled, nothing is posted. Pass --live to post for real.");
@@ -233,6 +238,20 @@ async function main() {
     }
     const chosenLabel = optionTexts[chosenIndex];
 
+    const prior = findPosted(history, opts.geeklist, chosenLabel);
+    if (prior) {
+      const again = await confirm({
+        message: `"${chosenLabel}" was already posted to this geeklist on ${prior.postedAt.slice(0, 10)}${prior.price ? ` at $${prior.price}` : ""}. Post it again?`,
+        default: false,
+      });
+      if (!again) {
+        console.log(`  Skipped: already posted.`);
+        const cancelBtn = await page.$("button:has-text('Cancel')");
+        if (cancelBtn) await cancelBtn.click();
+        continue;
+      }
+    }
+
     let effectiveRow = row;
     if (opts.checkPrices) {
       effectiveRow = { ...row, price: await checkPrice(page, context, row, chosenLabel) };
@@ -255,6 +274,7 @@ async function main() {
       await saveBtn.click();
       await page.waitForSelector("gg-geeklist-item-edit-new", { state: "detached", timeout: 15000 });
       posted++;
+      recordPosted(opts.history, history, opts.geeklist, chosenLabel, effectiveRow.price);
       console.log(`  Posted.`);
     } else {
       const screenshotPath = path.join(ROOT, `dry-run-${i + 1}.png`);
