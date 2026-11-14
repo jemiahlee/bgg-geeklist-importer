@@ -78,14 +78,20 @@ function sleep(ms) {
 
 const SKIP = Symbol("skip");
 
+// When recent sales span more than this many dollars, the median alone is
+// misleading, so the individual newest sales are listed too.
+const WIDE_RANGE = 30;
+const WIDE_RANGE_SAMPLE = 5;
+
 // `matched` is the BGG match already resolved for the chosen option, or null.
 // Resolves to the price to use, or SKIP if the user chose to skip the item.
 async function checkPrice(page, pricePage, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
 
   let salesSummary = null;
+  let sales = [];
   if (matched) {
-    const sales = await getBggRecentSales(pricePage, matched.id, { limit: 15 });
+    sales = await getBggRecentSales(pricePage, matched.id, { limit: 15 });
     salesSummary = summarizeRecentSales(sales, row.condition);
   } else {
     console.log(`  Could not resolve a BGG id for "${chosenLabel}" — skipping recent sales lookup.`);
@@ -114,6 +120,14 @@ async function checkPrice(page, pricePage, row, chosenLabel, matched) {
         );
       } else {
         console.log(`    No recent "${salesSummary.matchedLabel}" condition sales in this sample.`);
+      }
+    }
+    if (max - min > WIDE_RANGE) {
+      console.log(`    Wide range (over $${WIDE_RANGE}); the ${WIDE_RANGE_SAMPLE} most recent USD sales:`);
+      for (const sale of sales.slice(0, WIDE_RANGE_SAMPLE)) {
+        console.log(
+          `      $${sale.price.toFixed(2)} ${sale.condition}, ${sale.date} — https://boardgamegeek.com/market/saleitem/${sale.itemId}`
+        );
       }
     }
   } else {

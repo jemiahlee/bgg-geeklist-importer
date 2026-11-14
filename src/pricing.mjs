@@ -70,6 +70,7 @@ export async function getBggRecentSales(page, bggId, { limit = 15 } = {}) {
         const cells = tr.querySelectorAll("td");
         if (cells.length < 4) return null; // skips the <th> header row
         return {
+          itemId: cells[0]?.textContent.trim().replace(/^#/, "") ?? "",
           price: cells[1]?.textContent.trim() ?? "",
           condition: cells[2]?.textContent.trim() ?? "",
           date: cells[3]?.textContent.trim() ?? "",

@@ -80,7 +80,8 @@ as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to t
   - BGG's own GeekMarket Price History (actual recent sales, filtered to USD),
     shown overall and, if the CSV `condition` matches one of BGG's standard
     condition labels (New, Like New, Very Good, Good, Acceptable), broken out
-    for that condition specifically.
+    for that condition specifically. If the sales span more than $30, the 5 most
+    recent are also listed individually, with links.
   - BoardGameOracle's lowest current new/retail price, as a reference ceiling.
   - Noble Knight Games' cheapest in-stock listings (new and used, with their
     condition grades) for the game. Expansions and oddly titled products may
