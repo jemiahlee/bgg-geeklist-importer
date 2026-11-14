@@ -87,6 +87,9 @@ const WIDE_RANGE_SAMPLE = 5;
 // Resolves to the price to use, or SKIP if the user chose to skip the item.
 async function checkPrice(page, pricePage, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
+  if (matched) {
+    console.log(`  BGG price history: https://boardgamegeek.com/market/pricehistory/thing/${matched.id}`);
+  }
 
   let salesSummary = null;
   let sales = [];
