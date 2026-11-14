@@ -6,3 +6,6 @@ skipped.csv
 dry-run-*.png
 *.local.csv
 posted.json
+skipped-*.csv
+reprice.csv
+delete.csv

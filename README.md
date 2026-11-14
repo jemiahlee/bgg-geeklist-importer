@@ -89,3 +89,29 @@ as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to t
   You get a prompt with a suggested default (the condition-matched median sale
   price when available) that you can accept or type over. Type `skip` instead of a
   price to skip the item; it's listed in `skipped.csv` for later.
+
+## Repricing items
+
+`bun run reprice` lowers the price on items you've already posted. It reads a CSV
+with `game,price` (or `bgg_id,price`; see `reprice.sample.csv`), where `price` is the
+new price, and defaults to `reprice.csv`.
+
+For each row it finds your matching item on the geeklist (an exact title or BGG ID
+match is taken as-is; a looser match asks you to pick), reads the item's current
+`Price:` line, and strikes it through with the new price after it. Repricing again
+keeps the earlier strikethroughs:
+
+```
+Price: $25
+Price: [-]$25[/-] $20
+Price: [-]$25[/-] [-]$20[/-] $15
+```
+
+It compares against what is on BGG, so re-running the same CSV is harmless: items
+already at the new price are left alone. Rows that aren't a reduction, have no
+`Price:` line, or don't match one of your items are skipped and listed in
+`skipped-reprice.csv`. Like posting, it is a dry run (it prints the planned edits)
+until you pass `--live`, which asks for confirmation first. Edited items also get
+their price updated in `posted.json`.
+
+Flags: `--csv`, `--geeklist`, `--history`, `--live`, `--delay-ms`.

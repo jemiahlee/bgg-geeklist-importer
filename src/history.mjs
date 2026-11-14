@@ -46,6 +46,13 @@ export function findPostedByTitle(history, geeklistUrl, title) {
   return entries.find((e) => stripYear(normalizeLabel(e.label)) === want) ?? null;
 }
 
+// Write-then-rename so a crash mid-write can't corrupt the ledger.
+function save(file, history) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(history, null, 2) + "\n");
+  fs.renameSync(tmp, file);
+}
+
 export function recordPosted(file, history, geeklistUrl, item, price) {
   const list = (history[geeklistId(geeklistUrl)] ??= {});
   const key = itemKey(item);
@@ -56,8 +63,25 @@ export function recordPosted(file, history, geeklistUrl, item, price) {
     price,
     count: (list[key]?.count ?? 0) + 1,
   };
-  // Write-then-rename so a crash mid-write can't corrupt the ledger.
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(history, null, 2) + "\n");
-  fs.renameSync(tmp, file);
+  save(file, history);
+}
+
+// Records a price change on an existing entry, keeping the earlier prices.
+// Returns false if the item isn't in the ledger.
+export function updatePrice(file, history, geeklistUrl, item, price) {
+  const entry = findPosted(history, geeklistUrl, item);
+  if (!entry) return false;
+  entry.priceHistory = [...(entry.priceHistory ?? []), { price: entry.price, changedAt: new Date().toISOString() }];
+  entry.price = price;
+  save(file, history);
+  return true;
+}
+
+export function removePosted(file, history, geeklistUrl, item) {
+  const list = history[geeklistId(geeklistUrl)];
+  const key = itemKey(item);
+  if (!list?.[key]) return false;
+  delete list[key];
+  save(file, history);
+  return true;
 }
