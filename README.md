@@ -58,7 +58,8 @@ items to behave like a normal user, not a scraper.
 ## Duplicate protection
 
 Every item posted with `--live` is recorded in `posted.json` (gitignored), keyed by
-geeklist and the BGG item you picked. If a later run reaches an item that was already
+geeklist and the BGG ID of the item you picked (so distinct games that share a name and
+year, like the two "Flowers (2024)", are tracked separately). If a later run reaches an item that was already
 posted to the same geeklist, you're told when it was posted and can skip it, skip it
 and every other previously posted item for the rest of the run, or post it again. Pass
 `--skip-posted` to skip them all without being asked, so the same CSV can be re-run

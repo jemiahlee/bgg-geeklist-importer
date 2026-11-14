@@ -76,11 +76,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// `matched` is the BGG id already resolved for the chosen option, if any.
+// `matched` is the BGG match already resolved for the chosen option, or null.
 async function checkPrice(page, context, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
-
-  matched ??= matchBggOptions(await searchBggCandidates(page, row.game), [chosenLabel])[0];
 
   let salesSummary = null;
   if (matched) {
@@ -251,10 +249,10 @@ async function main() {
     }
 
     const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
+    // Resolve BGG ids up front: they identify the item in the ledger and drive pricing.
+    const matches = matchBggOptions(await searchBggCandidates(page, row.game), optionTexts);
     let chosenIndex = 0;
-    let matches = [];
     if (options.length > 1) {
-      matches = matchBggOptions(await searchBggCandidates(page, row.game), optionTexts);
       console.log(`  Matches for "${row.game}":`);
       optionTexts.forEach((t, idx) => {
         const id = matches[idx]?.id;
@@ -277,7 +275,8 @@ async function main() {
     }
     const chosenLabel = optionTexts[chosenIndex];
 
-    const prior = findPosted(history, opts.geeklist, chosenLabel);
+    const chosen = { id: matches[chosenIndex]?.id ?? null, label: chosenLabel };
+    const prior = findPosted(history, opts.geeklist, chosen);
     if (prior && !repostConfirmed && (await shouldSkipPosted(opts, prior))) {
       console.log(`  Skipped: already posted.`);
       const cancelBtn = await page.$("button:has-text('Cancel')");
@@ -307,7 +306,7 @@ async function main() {
       await saveBtn.click();
       await page.waitForSelector("gg-geeklist-item-edit-new", { state: "detached", timeout: 15000 });
       posted++;
-      recordPosted(opts.history, history, opts.geeklist, chosenLabel, effectiveRow.price);
+      recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price);
       console.log(`  Posted.`);
     } else {
       const screenshotPath = path.join(ROOT, `dry-run-${i + 1}.png`);
