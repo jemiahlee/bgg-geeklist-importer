@@ -115,3 +115,22 @@ until you pass `--live`, which asks for confirmation first. Edited items also ge
 their price updated in `posted.json`.
 
 Flags: `--csv`, `--geeklist`, `--history`, `--live`, `--delay-ms`.
+
+## Deleting items
+
+`bun run delete` removes items from the geeklist. **Deletion is permanent; BGG has no
+undo.** It reads a CSV with `game` (or `bgg_id`); see `delete.sample.csv`. The default
+is `delete.csv`.
+
+It finds your matching items the same way `reprice` does, then prints exactly what it
+would delete (title, link, the price from `posted.json`, and a warning if the item has
+comments). Nothing is deleted until you pass `--live` and answer yes to a confirmation
+that defaults to no. It only ever clicks an item's own Delete button, never Mark Sold.
+If anything unexpected happens (a button or dialog it doesn't recognise, an item that
+is still there afterwards) it stops instead of continuing. Deleted items are removed
+from `posted.json`, so a later post won't think they're still listed. Rows that don't
+match are listed in `skipped-delete.csv`.
+
+Try your first `--live` run with a one-row CSV.
+
+Flags: `--csv`, `--geeklist`, `--history`, `--live`, `--delay-ms`.

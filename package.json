@@ -6,7 +6,8 @@
   "scripts": {
     "login": "node src/login.mjs",
     "post": "node src/post.mjs",
-    "reprice": "node src/reprice.mjs"
+    "reprice": "node src/reprice.mjs",
+    "delete": "node src/delete.mjs"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
