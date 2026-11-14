@@ -59,31 +59,28 @@ export function matchBggOptions(candidates, labels) {
 
 // GeekMarket Price History lists actual sold items (price, condition, sale date),
 // newest first — a better pricing signal than active "for sale" listings.
-export async function getBggRecentSales(context, bggId, { limit = 15 } = {}) {
-  const page = await context.newPage();
-  try {
-    await page.goto(`https://boardgamegeek.com/market/pricehistory/thing/${bggId}`, { waitUntil: "networkidle" });
-    await page.waitForSelector("table tbody tr", { timeout: 10000 }).catch(() => {});
-    const rows = await page.$$eval("table tbody tr", (trs) =>
-      trs
-        .map((tr) => {
-          const cells = tr.querySelectorAll("td");
-          if (cells.length < 4) return null; // skips the <th> header row
-          return {
-            price: cells[1]?.textContent.trim() ?? "",
-            condition: cells[2]?.textContent.trim() ?? "",
-            date: cells[3]?.textContent.trim() ?? "",
-          };
-        })
-        .filter(Boolean)
-    );
-    return rows
-      .filter((r) => r.price.startsWith("$"))
-      .slice(0, limit)
-      .map((r) => ({ ...r, price: Number.parseFloat(r.price.replace(/[^0-9.]/g, "")) }));
-  } finally {
-    await page.close();
-  }
+// `page` is a long-lived tab owned by the caller: opening and closing a fresh
+// tab per lookup makes Chrome pull its window to the front each time.
+export async function getBggRecentSales(page, bggId, { limit = 15 } = {}) {
+  await page.goto(`https://boardgamegeek.com/market/pricehistory/thing/${bggId}`, { waitUntil: "networkidle" });
+  await page.waitForSelector("table tbody tr", { timeout: 10000 }).catch(() => {});
+  const rows = await page.$$eval("table tbody tr", (trs) =>
+    trs
+      .map((tr) => {
+        const cells = tr.querySelectorAll("td");
+        if (cells.length < 4) return null; // skips the <th> header row
+        return {
+          price: cells[1]?.textContent.trim() ?? "",
+          condition: cells[2]?.textContent.trim() ?? "",
+          date: cells[3]?.textContent.trim() ?? "",
+        };
+      })
+      .filter(Boolean)
+  );
+  return rows
+    .filter((r) => r.price.startsWith("$"))
+    .slice(0, limit)
+    .map((r) => ({ ...r, price: Number.parseFloat(r.price.replace(/[^0-9.]/g, "")) }));
 }
 
 export function summarizeRecentSales(sales, conditionHint) {

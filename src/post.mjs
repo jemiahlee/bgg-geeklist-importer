@@ -77,12 +77,12 @@ function sleep(ms) {
 }
 
 // `matched` is the BGG match already resolved for the chosen option, or null.
-async function checkPrice(page, context, row, chosenLabel, matched) {
+async function checkPrice(page, pricePage, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
 
   let salesSummary = null;
   if (matched) {
-    const sales = await getBggRecentSales(context, matched.id, { limit: 15 });
+    const sales = await getBggRecentSales(pricePage, matched.id, { limit: 15 });
     salesSummary = summarizeRecentSales(sales, row.condition);
   } else {
     console.log(`  Could not resolve a BGG id for "${chosenLabel}" — skipping recent sales lookup.`);
@@ -203,6 +203,9 @@ async function main() {
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
   });
+  // Price lookups reuse one tab for the whole run (see getBggRecentSales). It's
+  // opened first so the geeklist tab stays the active one.
+  const pricePage = opts.checkPrices ? await context.newPage() : null;
   const page = await context.newPage();
 
   await page.goto(opts.geeklist, { waitUntil: "networkidle" });
@@ -286,7 +289,7 @@ async function main() {
 
     let effectiveRow = row;
     if (opts.checkPrices) {
-      effectiveRow = { ...row, price: await checkPrice(page, context, row, chosenLabel, matches[chosenIndex]) };
+      effectiveRow = { ...row, price: await checkPrice(page, pricePage, row, chosenLabel, matches[chosenIndex]) };
     }
 
     await options[chosenIndex].click();
