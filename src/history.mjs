@@ -26,6 +26,18 @@ export function findPosted(history, geeklistUrl, label) {
   return history[geeklistId(geeklistUrl)]?.[itemKey(label)] ?? null;
 }
 
+function stripYear(key) {
+  return key.replace(/\s*\(\d{4}\)$/, "");
+}
+
+// Match a CSV game title against ledger labels ("Nippon" vs "Nippon (2015)")
+// without needing the BGG search/disambiguation step first.
+export function findPostedByTitle(history, geeklistUrl, title) {
+  const want = stripYear(itemKey(title));
+  const entries = Object.values(history[geeklistId(geeklistUrl)] ?? {});
+  return entries.find((e) => stripYear(itemKey(e.label)) === want) ?? null;
+}
+
 export function recordPosted(file, history, geeklistUrl, label, price) {
   const list = (history[geeklistId(geeklistUrl)] ??= {});
   const key = itemKey(label);

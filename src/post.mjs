@@ -16,7 +16,7 @@ import {
   searchNobleKnight,
   matchNobleKnightItems,
 } from "./pricing.mjs";
-import { loadHistory, findPosted, recordPosted } from "./history.mjs";
+import { loadHistory, findPosted, findPostedByTitle, recordPosted } from "./history.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -118,10 +118,12 @@ async function checkPrice(page, context, row, chosenLabel) {
   } else {
     console.log(`  BGG recent sales: no data found.`);
   }
-  if (oracleMatch) {
+  if (oracleMatch?.lowest_price) {
     console.log(
       `  BoardGameOracle lowest new price: $${oracleMatch.lowest_price.price.toFixed(2)} (${oracleMatch.lowest_price.merchantShortName}, ${oracleMatch.prices_count} listing(s))`
     );
+  } else if (oracleMatch) {
+    console.log(`  BoardGameOracle: matched, but no current new-copy listings.`);
   } else {
     console.log(`  BoardGameOracle: no match found.`);
   }
@@ -140,6 +142,22 @@ async function checkPrice(page, context, row, chosenLabel) {
     message: `  Price to use for this listing (CSV had ${row.price})`,
     default: String(suggested),
   });
+}
+
+// Returns true if the item should be skipped. Prompts unless --skip-posted
+// (or an earlier "skip all" answer) is in effect.
+async function shouldSkipPosted(opts, prior) {
+  if (opts.skipPosted) return true;
+  const action = await select({
+    message: `"${prior.label}" was already posted to this geeklist on ${prior.postedAt.slice(0, 10)}${prior.price ? ` at $${prior.price}` : ""}.`,
+    choices: [
+      { name: "Skip it", value: "skip" },
+      { name: "Skip it and all other previously posted items this run", value: "skip-all" },
+      { name: "Post it again", value: "post" },
+    ],
+  });
+  if (action === "skip-all") opts.skipPosted = true;
+  return action !== "post";
 }
 
 async function main() {
@@ -198,6 +216,18 @@ async function main() {
     const label = `[${i + 1}/${limited.length}] ${row.game}`;
     console.log(`\n${label}`);
 
+    // Check the ledger by title before searching BGG, so already-posted games
+    // don't trigger the disambiguation prompt.
+    let repostConfirmed = false;
+    const priorByTitle = findPostedByTitle(history, opts.geeklist, row.game);
+    if (priorByTitle) {
+      if (await shouldSkipPosted(opts, priorByTitle)) {
+        console.log(`  Skipped: already posted as "${priorByTitle.label}".`);
+        continue;
+      }
+      repostConfirmed = true;
+    }
+
     const addButtons = await page.$$("button:has-text('Add Item')");
     await addButtons[0].click();
 
@@ -247,25 +277,11 @@ async function main() {
     const chosenLabel = optionTexts[chosenIndex];
 
     const prior = findPosted(history, opts.geeklist, chosenLabel);
-    if (prior) {
-      let action = "skip";
-      if (!opts.skipPosted) {
-        action = await select({
-          message: `"${chosenLabel}" was already posted to this geeklist on ${prior.postedAt.slice(0, 10)}${prior.price ? ` at $${prior.price}` : ""}.`,
-          choices: [
-            { name: "Skip it", value: "skip" },
-            { name: "Skip it and all other previously posted items this run", value: "skip-all" },
-            { name: "Post it again", value: "post" },
-          ],
-        });
-        if (action === "skip-all") opts.skipPosted = true;
-      }
-      if (action !== "post") {
-        console.log(`  Skipped: already posted.`);
-        const cancelBtn = await page.$("button:has-text('Cancel')");
-        if (cancelBtn) await cancelBtn.click();
-        continue;
-      }
+    if (prior && !repostConfirmed && (await shouldSkipPosted(opts, prior))) {
+      console.log(`  Skipped: already posted.`);
+      const cancelBtn = await page.$("button:has-text('Cancel')");
+      if (cancelBtn) await cancelBtn.click();
+      continue;
     }
 
     let effectiveRow = row;
