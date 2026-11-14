@@ -85,7 +85,7 @@ const WIDE_RANGE_SAMPLE = 5;
 
 // `matched` is the BGG match already resolved for the chosen option, or null.
 // Resolves to the price to use, or SKIP if the user chose to skip the item.
-async function checkPrice(page, pricePage, row, chosenLabel, matched) {
+async function checkPrice(pricePage, query, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
   if (matched) {
     console.log(`  BGG price history: https://boardgamegeek.com/market/pricehistory/thing/${matched.id}`);
@@ -105,7 +105,7 @@ async function checkPrice(page, pricePage, row, chosenLabel, matched) {
   let nobleKnightMatches = [];
   if (nameYearMatch) {
     const [, name, year] = nameYearMatch;
-    const oracleItems = await searchBoardGameOracle(row.game);
+    const oracleItems = await searchBoardGameOracle(query);
     oracleMatch = matchOracleItem(oracleItems, name.trim(), Number(year));
     const nobleKnightItems = await searchNobleKnight(name.trim());
     nobleKnightMatches = matchNobleKnightItems(nobleKnightItems, name.trim());
@@ -254,18 +254,28 @@ async function main() {
     await addButtons[0].click();
 
     const searchBox = await page.waitForSelector("input[placeholder='Search or Paste a Link']");
-    await searchBox.fill(row.game);
-
+    // If nothing matches, offer a different search term (e.g. a BGG title that
+    // differs from the CSV name) before giving up on the row.
+    let query = row.game;
     let options = [];
-    try {
-      await page.waitForSelector("ngb-typeahead-window button[role='option']", { timeout: 8000 });
-      options = await page.$$("ngb-typeahead-window button[role='option']");
-    } catch {
-      // no matches
+    while (true) {
+      await searchBox.fill(query);
+      try {
+        await page.waitForSelector("ngb-typeahead-window button[role='option']", { timeout: 8000 });
+        options = await page.$$("ngb-typeahead-window button[role='option']");
+      } catch {
+        // no matches
+      }
+      if (options.length > 0) break;
+      const next = await input({
+        message: `  No BGG matches found for "${query}". Enter a different name to search (blank to skip):`,
+      });
+      if (!next.trim()) break;
+      query = next.trim();
     }
 
     if (options.length === 0) {
-      console.log(`  No BGG matches found for "${row.game}". Skipping — add this one manually.`);
+      console.log(`  Skipping — add this one manually.`);
       skipped.push({ ...row, reason: "no BGG match found" });
       const cancelBtn = await page.$("button:has-text('Cancel')");
       if (cancelBtn) await cancelBtn.click();
@@ -274,16 +284,16 @@ async function main() {
 
     const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
     // Resolve BGG ids up front: they identify the item in the ledger and drive pricing.
-    const matches = matchBggOptions(await searchBggCandidates(page, row.game), optionTexts);
+    const matches = matchBggOptions(await searchBggCandidates(page, query), optionTexts);
     let chosenIndex = 0;
     if (options.length > 1) {
-      console.log(`  Matches for "${row.game}":`);
+      console.log(`  Matches for "${query}":`);
       optionTexts.forEach((t, idx) => {
         const id = matches[idx]?.id;
         console.log(`    ${t}${id ? ` — https://boardgamegeek.com/boardgame/${id}` : ""}`);
       });
       chosenIndex = await select({
-        message: `Multiple BGG matches for "${row.game}" — pick the right one:`,
+        message: `Multiple BGG matches for "${query}" — pick the right one:`,
         choices: [
           ...optionTexts.map((t, idx) => ({ name: t, value: idx })),
           { name: "(skip this row)", value: -1 },
@@ -310,7 +320,7 @@ async function main() {
 
     let effectiveRow = row;
     if (opts.checkPrices) {
-      const price = await checkPrice(page, pricePage, row, chosenLabel, matches[chosenIndex]);
+      const price = await checkPrice(pricePage, query, row, chosenLabel, matches[chosenIndex]);
       if (price === SKIP) {
         console.log(`  Skipped by user.`);
         skipped.push({ ...row, reason: "skipped at price prompt" });
