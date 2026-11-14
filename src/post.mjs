@@ -65,7 +65,15 @@ Price: \${{price}}
 {{boilerplate}}`;
 
 function renderBody(template, row, boilerplate) {
-  return template
+  // Drop lines that exist only to label the condition ("Condition: {{condition}}")
+  // when the CSV has none, rather than posting a bare "Condition:".
+  const body = row.condition?.trim()
+    ? template
+    : template
+        .split("\n")
+        .filter((line) => !line.includes("{{condition}}"))
+        .join("\n");
+  return body
     .replaceAll("{{game}}", row.game ?? "")
     .replaceAll("{{price}}", row.price ?? "")
     .replaceAll("{{condition}}", row.condition ?? "")
