@@ -91,6 +91,9 @@ const SKIP = Symbol("skip");
 const WIDE_RANGE = 30;
 const WIDE_RANGE_SAMPLE = 5;
 
+const isSkip = (value) => value.trim().toLowerCase() === "skip";
+const isValidPrice = (value) => /^\d+(\.\d{1,2})?$/.test(value.trim()) && Number(value) > 0;
+
 // `matched` is the BGG match already resolved for the chosen option, or null.
 // Resolves to the price to use, or SKIP if the user chose to skip the item.
 async function checkPrice(pricePage, query, row, chosenLabel, matched) {
@@ -165,10 +168,11 @@ async function checkPrice(pricePage, query, row, chosenLabel, matched) {
   const suggested = salesSummary?.byCondition?.median ?? salesSummary?.overall?.median ?? row.price;
 
   const answer = await input({
-    message: `  Price to use for this listing (CSV had ${row.price}; type "skip" to skip this item)`,
-    default: String(suggested),
+    message: `  Price to use for this listing (CSV had ${row.price || "no price"}; type "skip" to skip this item)`,
+    default: suggested ? String(suggested) : undefined,
+    validate: (value) => isSkip(value) || isValidPrice(value) || 'Enter a number such as 25 or 24.99 (no "$"), or "skip".',
   });
-  return answer.trim().toLowerCase() === "skip" ? SKIP : answer;
+  return isSkip(answer) ? SKIP : answer.trim();
 }
 
 // Returns true if the item should be skipped. Prompts unless --skip-posted
