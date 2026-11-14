@@ -1,11 +1,11 @@
-import { chromium } from "playwright";
 import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
 import { select, confirm, input } from "@inquirer/prompts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { STORAGE_STATE_PATH } from "./config.mjs";
+import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
+import { isValidPrice } from "./markup.mjs";
 import {
   searchBggCandidates,
   matchBggOptions,
@@ -28,7 +28,7 @@ function parseArgs() {
     boilerplate: path.join(ROOT, "boilerplate.txt"),
     template: path.join(ROOT, "template.txt"),
     history: path.join(ROOT, "posted.json"),
-    geeklist: "https://boardgamegeek.com/geeklist/343300/portland-or-area-virtual-flea-market-v20",
+    geeklist: DEFAULT_GEEKLIST,
     live: false,
     limit: Infinity,
     delayMs: 4000,
@@ -92,7 +92,6 @@ const WIDE_RANGE = 30;
 const WIDE_RANGE_SAMPLE = 5;
 
 const isSkip = (value) => value.trim().toLowerCase() === "skip";
-const isValidPrice = (value) => /^\d+(\.\d{1,2})?$/.test(value.trim()) && Number(value) > 0;
 
 // `matched` is the BGG match already resolved for the chosen option, or null.
 // Resolves to the price to use, or SKIP if the user chose to skip the item.
@@ -198,10 +197,7 @@ async function main() {
     console.error(`CSV not found: ${opts.csv}`);
     process.exit(1);
   }
-  if (!fs.existsSync(STORAGE_STATE_PATH)) {
-    console.error(`No saved login session found at ${STORAGE_STATE_PATH}. Run "bun run login" first.`);
-    process.exit(1);
-  }
+  requireLogin();
 
   const rows = parse(fs.readFileSync(opts.csv, "utf8"), { columns: true, skip_empty_lines: true, trim: true });
   const boilerplate = readOptional(opts.boilerplate);
@@ -224,18 +220,7 @@ async function main() {
     }
   }
 
-  const browser = await chromium.launch({
-    headless: false,
-    channel: "chrome",
-    args: ["--disable-blink-features=AutomationControlled"],
-  });
-  const context = await browser.newContext({
-    storageState: STORAGE_STATE_PATH,
-    viewport: { width: 1280, height: 900 },
-  });
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-  });
+  const { browser, context } = await launchSession();
   // Price lookups reuse one tab for the whole run (see getBggRecentSales). It's
   // opened first so the geeklist tab stays the active one.
   const pricePage = opts.checkPrices ? await context.newPage() : null;
