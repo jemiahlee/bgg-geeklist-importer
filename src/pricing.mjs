@@ -35,12 +35,26 @@ export async function searchBggCandidates(page, query) {
 }
 
 // `label` is the text of the typeahead option the user picked, e.g. "Catan: Cities & Knights (1998)".
-export function matchBggId(candidates, label) {
+// BGG can have several distinct games with the same name and year (two "Flowers (2024)"),
+// so `occurrence` picks the nth candidate with that label.
+export function matchBggId(candidates, label, occurrence = 0) {
   const m = label.match(/^(.*?)\s*\((\d{4})\)\s*$/);
   if (!m) return null;
   const [, name, year] = m;
-  const found = candidates.find((c) => c.name === name.trim() && String(c.year) === year);
+  const found = candidates.filter((c) => c.name === name.trim() && String(c.year) === year)[occurrence];
   return found ? { id: found.id, name: found.name, year: found.year } : null;
+}
+
+// Resolves every typeahead option label to a BGG id. Options with identical labels
+// are paired with identically-labelled candidates in order, since the typeahead and
+// the search endpoint list duplicates in the same order.
+export function matchBggOptions(candidates, labels) {
+  const seen = new Map();
+  return labels.map((label) => {
+    const occurrence = seen.get(label) ?? 0;
+    seen.set(label, occurrence + 1);
+    return matchBggId(candidates, label, occurrence);
+  });
 }
 
 // GeekMarket Price History lists actual sold items (price, condition, sale date),

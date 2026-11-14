@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { STORAGE_STATE_PATH } from "./config.mjs";
 import {
   searchBggCandidates,
-  matchBggId,
+  matchBggOptions,
   getBggRecentSales,
   summarizeRecentSales,
   searchBoardGameOracle,
@@ -76,11 +76,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function checkPrice(page, context, row, chosenLabel) {
+// `matched` is the BGG id already resolved for the chosen option, if any.
+async function checkPrice(page, context, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
 
-  const candidates = await searchBggCandidates(page, row.game);
-  const matched = matchBggId(candidates, chosenLabel);
+  matched ??= matchBggOptions(await searchBggCandidates(page, row.game), [chosenLabel])[0];
 
   let salesSummary = null;
   if (matched) {
@@ -252,13 +252,14 @@ async function main() {
 
     const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
     let chosenIndex = 0;
+    let matches = [];
     if (options.length > 1) {
-      const candidates = await searchBggCandidates(page, row.game);
+      matches = matchBggOptions(await searchBggCandidates(page, row.game), optionTexts);
       console.log(`  Matches for "${row.game}":`);
-      for (const t of optionTexts) {
-        const id = matchBggId(candidates, t)?.id;
+      optionTexts.forEach((t, idx) => {
+        const id = matches[idx]?.id;
         console.log(`    ${t}${id ? ` — https://boardgamegeek.com/boardgame/${id}` : ""}`);
-      }
+      });
       chosenIndex = await select({
         message: `Multiple BGG matches for "${row.game}" — pick the right one:`,
         choices: [
@@ -286,7 +287,7 @@ async function main() {
 
     let effectiveRow = row;
     if (opts.checkPrices) {
-      effectiveRow = { ...row, price: await checkPrice(page, context, row, chosenLabel) };
+      effectiveRow = { ...row, price: await checkPrice(page, context, row, chosenLabel, matches[chosenIndex]) };
     }
 
     await options[chosenIndex].click();
