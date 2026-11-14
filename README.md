@@ -86,4 +86,5 @@ as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to t
     condition grades) for the game. Expansions and oddly titled products may
     not match and will show "no match found".
   You get a prompt with a suggested default (the condition-matched median sale
-  price when available) that you can accept or type over.
+  price when available) that you can accept or type over. Type `skip` instead of a
+  price to skip the item; it's listed in `skipped.csv` for later.

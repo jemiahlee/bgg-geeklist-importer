@@ -76,7 +76,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const SKIP = Symbol("skip");
+
 // `matched` is the BGG match already resolved for the chosen option, or null.
+// Resolves to the price to use, or SKIP if the user chose to skip the item.
 async function checkPrice(page, pricePage, row, chosenLabel, matched) {
   console.log(`  Looking up pricing data for "${chosenLabel}"...`);
 
@@ -136,10 +139,11 @@ async function checkPrice(page, pricePage, row, chosenLabel, matched) {
 
   const suggested = salesSummary?.byCondition?.median ?? salesSummary?.overall?.median ?? row.price;
 
-  return input({
-    message: `  Price to use for this listing (CSV had ${row.price})`,
+  const answer = await input({
+    message: `  Price to use for this listing (CSV had ${row.price}; type "skip" to skip this item)`,
     default: String(suggested),
   });
+  return answer.trim().toLowerCase() === "skip" ? SKIP : answer;
 }
 
 // Returns true if the item should be skipped. Prompts unless --skip-posted
@@ -289,7 +293,15 @@ async function main() {
 
     let effectiveRow = row;
     if (opts.checkPrices) {
-      effectiveRow = { ...row, price: await checkPrice(page, pricePage, row, chosenLabel, matches[chosenIndex]) };
+      const price = await checkPrice(page, pricePage, row, chosenLabel, matches[chosenIndex]);
+      if (price === SKIP) {
+        console.log(`  Skipped by user.`);
+        skipped.push({ ...row, reason: "skipped at price prompt" });
+        const cancelBtn = await page.$("button:has-text('Cancel')");
+        if (cancelBtn) await cancelBtn.click();
+        continue;
+      }
+      effectiveRow = { ...row, price };
     }
 
     await options[chosenIndex].click();
