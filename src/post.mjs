@@ -34,10 +34,15 @@ function parseArgs() {
     delayMs: 4000,
     checkPrices: true,
     skipPosted: false,
+    interactive: false,
+    csvGiven: false,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--csv") opts.csv = path.resolve(args[++i]);
+    if (a === "--csv") {
+      opts.csv = path.resolve(args[++i]);
+      opts.csvGiven = true;
+    } else if (a === "--interactive" || a === "-i") opts.interactive = true;
     else if (a === "--boilerplate") opts.boilerplate = path.resolve(args[++i]);
     else if (a === "--template") opts.template = path.resolve(args[++i]);
     else if (a === "--history") opts.history = path.resolve(args[++i]);
@@ -166,8 +171,13 @@ async function checkPrice(pricePage, query, row, chosenLabel, matched) {
 
   const suggested = salesSummary?.byCondition?.median ?? salesSummary?.overall?.median ?? row.price;
 
+  return askPrice(`  Price to use for this listing (CSV had ${row.price || "no price"}; type "skip" to skip this item)`, suggested);
+}
+
+// Resolves to the price entered, or SKIP if the user typed "skip".
+async function askPrice(message, suggested) {
   const answer = await input({
-    message: `  Price to use for this listing (CSV had ${row.price || "no price"}; type "skip" to skip this item)`,
+    message,
     default: suggested ? String(suggested) : undefined,
     validate: (value) => isSkip(value) || isValidPrice(value) || 'Enter a number such as 25 or 24.99 (no "$"), or "skip".',
   });
@@ -190,26 +200,180 @@ async function shouldSkipPosted(opts, prior) {
   return action !== "post";
 }
 
+// The form renders with "subscribe" unchecked, then the page checks it by
+// default a moment later. Clicking in that gap gets undone by the page, which
+// makes Playwright's .check() fail, so give the default time to land and only
+// click if the box is still unchecked afterwards.
+async function ensureSubscribed(page, checkbox) {
+  for (let waited = 0; waited < 3000; waited += 100) {
+    if (await checkbox.isChecked()) return;
+    await page.waitForTimeout(100);
+  }
+  await checkbox.check();
+}
+
+async function cancelAdd(page) {
+  const cancelBtn = await page.$("button:has-text('Cancel')");
+  if (cancelBtn) await cancelBtn.click();
+}
+
+// Adds one item to the geeklist. `ctx` holds the shared run state (options,
+// pages, ledger, template, and the skipped/posted tallies). Resolves to
+// "posted", "dry-run" or "skipped"; skips that need manual follow-up are also
+// pushed onto ctx.skipped.
+async function processRow(ctx, row, shotNumber) {
+  const { opts, page, pricePage, history, template, boilerplate, skipped } = ctx;
+
+  // Check the ledger by title before searching BGG, so already-posted games
+  // don't trigger the disambiguation prompt.
+  let repostConfirmed = false;
+  const priorByTitle = findPostedByTitle(history, opts.geeklist, row.game);
+  if (priorByTitle) {
+    if (await shouldSkipPosted(opts, priorByTitle)) {
+      console.log(`  Skipped: already posted as "${priorByTitle.label}".`);
+      return "skipped";
+    }
+    repostConfirmed = true;
+  }
+
+  const addButtons = await page.$$("button:has-text('Add Item')");
+  await addButtons[0].click();
+
+  const searchBox = await page.waitForSelector("input[placeholder='Search or Paste a Link']");
+  // If nothing matches, offer a different search term (e.g. a BGG title that
+  // differs from the CSV name) before giving up on the row.
+  let query = row.game;
+  let options = [];
+  while (true) {
+    await searchBox.fill(query);
+    try {
+      await page.waitForSelector("ngb-typeahead-window button[role='option']", { timeout: 8000 });
+      options = await page.$$("ngb-typeahead-window button[role='option']");
+    } catch {
+      // no matches
+    }
+    if (options.length > 0) break;
+    const next = await input({
+      message: `  No BGG matches found for "${query}". Enter a different name to search (blank to skip):`,
+    });
+    if (!next.trim()) break;
+    query = next.trim();
+  }
+
+  if (options.length === 0) {
+    console.log(`  Skipping — add this one manually.`);
+    skipped.push({ ...row, reason: "no BGG match found" });
+    await cancelAdd(page);
+    return "skipped";
+  }
+
+  const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
+  // Resolve BGG ids up front: they identify the item in the ledger and drive pricing.
+  const matches = matchBggOptions(await searchBggCandidates(page, query), optionTexts);
+  let chosenIndex = 0;
+  if (options.length > 1) {
+    console.log(`  Matches for "${query}":`);
+    optionTexts.forEach((t, idx) => {
+      const id = matches[idx]?.id;
+      console.log(`    ${t}${id ? ` — https://boardgamegeek.com/boardgame/${id}` : ""}`);
+    });
+    chosenIndex = await select({
+      message: `Multiple BGG matches for "${query}" — pick the right one:`,
+      choices: [
+        ...optionTexts.map((t, idx) => ({ name: t, value: idx })),
+        { name: "(skip this row)", value: -1 },
+      ],
+    });
+    if (chosenIndex === -1) {
+      console.log(`  Skipped by user.`);
+      skipped.push({ ...row, reason: "skipped during disambiguation" });
+      await cancelAdd(page);
+      return "skipped";
+    }
+  }
+  const chosenLabel = optionTexts[chosenIndex];
+
+  const chosen = { id: matches[chosenIndex]?.id ?? null, label: chosenLabel };
+  const prior = findPosted(history, opts.geeklist, chosen);
+  if (prior && !repostConfirmed && (await shouldSkipPosted(opts, prior))) {
+    console.log(`  Skipped: already posted.`);
+    await cancelAdd(page);
+    return "skipped";
+  }
+
+  let effectiveRow = row;
+  let price = null;
+  if (opts.checkPrices) {
+    price = await checkPrice(pricePage, query, row, chosenLabel, matches[chosenIndex]);
+  } else if (opts.interactive && !row.price) {
+    // No CSV to supply a price, and no lookup to suggest one.
+    price = await askPrice(`  Price for "${chosenLabel}" (type "skip" to skip this item)`);
+  }
+  if (price === SKIP) {
+    console.log(`  Skipped by user.`);
+    skipped.push({ ...row, reason: "skipped at price prompt" });
+    await cancelAdd(page);
+    return "skipped";
+  }
+  if (price !== null) effectiveRow = { ...row, price };
+
+  await options[chosenIndex].click();
+  const continueBtn = await page.waitForSelector("button:has-text('Continue')");
+  await continueBtn.click();
+
+  // Locators re-resolve on every action: the form re-renders as it loads, which
+  // detaches element handles grabbed too early ("Element is not attached").
+  const form = page.locator("gg-geeklist-item-edit-new");
+  await form.waitFor();
+  await form.locator("textarea[name='text']").fill(renderBody(template, effectiveRow, boilerplate));
+  await ensureSubscribed(page, form.locator("input[name='subs']"));
+
+  if (opts.live) {
+    await form.locator("button:has-text('Save')").click();
+    await form.waitFor({ state: "detached", timeout: 15000 });
+    recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price);
+    console.log(`  Posted.`);
+    return "posted";
+  }
+
+  const screenshotPath = path.join(ROOT, `dry-run-${shotNumber}.png`);
+  await page.screenshot({ path: screenshotPath });
+  console.log(`  Dry run: filled form, screenshot saved to ${screenshotPath}`);
+  await form.locator("button:has-text('Cancel')").click();
+  await form.waitFor({ state: "detached", timeout: 15000 });
+  return "dry-run";
+}
+
 async function main() {
   const opts = parseArgs();
 
-  if (!fs.existsSync(opts.csv)) {
+  if (opts.interactive && opts.csvGiven) {
+    console.error("--interactive and --csv are mutually exclusive.");
+    process.exit(1);
+  }
+  if (!opts.interactive && !fs.existsSync(opts.csv)) {
     console.error(`CSV not found: ${opts.csv}`);
     process.exit(1);
   }
   requireLogin();
 
-  const rows = parse(fs.readFileSync(opts.csv, "utf8"), { columns: true, skip_empty_lines: true, trim: true });
   const boilerplate = readOptional(opts.boilerplate);
   const template = readOptional(opts.template, DEFAULT_TEMPLATE);
-
   const history = loadHistory(opts.history);
 
-  const limited = rows.slice(0, opts.limit);
-  console.log(`Loaded ${rows.length} row(s) from ${opts.csv}${opts.limit < rows.length ? `, processing first ${limited.length}` : ""}.`);
+  let limited = [];
+  if (opts.interactive) {
+    console.log("Interactive mode: enter game names one at a time; a blank name finishes.");
+  } else {
+    const rows = parse(fs.readFileSync(opts.csv, "utf8"), { columns: true, skip_empty_lines: true, trim: true });
+    limited = rows.slice(0, opts.limit);
+    console.log(`Loaded ${rows.length} row(s) from ${opts.csv}${opts.limit < rows.length ? `, processing first ${limited.length}` : ""}.`);
+  }
   console.log(opts.live ? "Mode: LIVE — items will actually be posted." : "Mode: DRY RUN — items are filled in and then cancelled, nothing is posted. Pass --live to post for real.");
 
-  if (opts.live) {
+  // Interactive mode has no fixed batch to confirm; each item is still
+  // disambiguated and priced by hand before it is saved.
+  if (opts.live && !opts.interactive) {
     const proceed = await confirm({
       message: `This will add ${limited.length} real item(s) to the live geeklist. Continue?`,
       default: false,
@@ -228,145 +392,38 @@ async function main() {
 
   await page.goto(opts.geeklist, { waitUntil: "networkidle" });
 
-  const skipped = [];
+  const ctx = { opts, page, pricePage, history, template, boilerplate, skipped: [] };
   let posted = 0;
 
-  for (const [i, row] of limited.entries()) {
-    const label = `[${i + 1}/${limited.length}] ${row.game}`;
-    console.log(`\n${label}`);
-
-    // Check the ledger by title before searching BGG, so already-posted games
-    // don't trigger the disambiguation prompt.
-    let repostConfirmed = false;
-    const priorByTitle = findPostedByTitle(history, opts.geeklist, row.game);
-    if (priorByTitle) {
-      if (await shouldSkipPosted(opts, priorByTitle)) {
-        console.log(`  Skipped: already posted as "${priorByTitle.label}".`);
-        continue;
+  try {
+    if (opts.interactive) {
+      let count = 0;
+      while (true) {
+        const game = (await input({ message: "Game name (blank to finish):" })).trim();
+        if (!game) break;
+        const condition = (await input({ message: "  Condition (blank for none):" })).trim();
+        count++;
+        console.log(`\n[${count}] ${game}`);
+        if ((await processRow(ctx, { game, condition, price: "" }, count)) === "posted") posted++;
       }
-      repostConfirmed = true;
-    }
-
-    const addButtons = await page.$$("button:has-text('Add Item')");
-    await addButtons[0].click();
-
-    const searchBox = await page.waitForSelector("input[placeholder='Search or Paste a Link']");
-    // If nothing matches, offer a different search term (e.g. a BGG title that
-    // differs from the CSV name) before giving up on the row.
-    let query = row.game;
-    let options = [];
-    while (true) {
-      await searchBox.fill(query);
-      try {
-        await page.waitForSelector("ngb-typeahead-window button[role='option']", { timeout: 8000 });
-        options = await page.$$("ngb-typeahead-window button[role='option']");
-      } catch {
-        // no matches
-      }
-      if (options.length > 0) break;
-      const next = await input({
-        message: `  No BGG matches found for "${query}". Enter a different name to search (blank to skip):`,
-      });
-      if (!next.trim()) break;
-      query = next.trim();
-    }
-
-    if (options.length === 0) {
-      console.log(`  Skipping — add this one manually.`);
-      skipped.push({ ...row, reason: "no BGG match found" });
-      const cancelBtn = await page.$("button:has-text('Cancel')");
-      if (cancelBtn) await cancelBtn.click();
-      continue;
-    }
-
-    const optionTexts = (await Promise.all(options.map((o) => o.textContent()))).map((t) => t.trim());
-    // Resolve BGG ids up front: they identify the item in the ledger and drive pricing.
-    const matches = matchBggOptions(await searchBggCandidates(page, query), optionTexts);
-    let chosenIndex = 0;
-    if (options.length > 1) {
-      console.log(`  Matches for "${query}":`);
-      optionTexts.forEach((t, idx) => {
-        const id = matches[idx]?.id;
-        console.log(`    ${t}${id ? ` — https://boardgamegeek.com/boardgame/${id}` : ""}`);
-      });
-      chosenIndex = await select({
-        message: `Multiple BGG matches for "${query}" — pick the right one:`,
-        choices: [
-          ...optionTexts.map((t, idx) => ({ name: t, value: idx })),
-          { name: "(skip this row)", value: -1 },
-        ],
-      });
-      if (chosenIndex === -1) {
-        console.log(`  Skipped by user.`);
-        skipped.push({ ...row, reason: "skipped during disambiguation" });
-        const cancelBtn = await page.$("button:has-text('Cancel')");
-        if (cancelBtn) await cancelBtn.click();
-        continue;
-      }
-    }
-    const chosenLabel = optionTexts[chosenIndex];
-
-    const chosen = { id: matches[chosenIndex]?.id ?? null, label: chosenLabel };
-    const prior = findPosted(history, opts.geeklist, chosen);
-    if (prior && !repostConfirmed && (await shouldSkipPosted(opts, prior))) {
-      console.log(`  Skipped: already posted.`);
-      const cancelBtn = await page.$("button:has-text('Cancel')");
-      if (cancelBtn) await cancelBtn.click();
-      continue;
-    }
-
-    let effectiveRow = row;
-    if (opts.checkPrices) {
-      const price = await checkPrice(pricePage, query, row, chosenLabel, matches[chosenIndex]);
-      if (price === SKIP) {
-        console.log(`  Skipped by user.`);
-        skipped.push({ ...row, reason: "skipped at price prompt" });
-        const cancelBtn = await page.$("button:has-text('Cancel')");
-        if (cancelBtn) await cancelBtn.click();
-        continue;
-      }
-      effectiveRow = { ...row, price };
-    }
-
-    await options[chosenIndex].click();
-    const continueBtn = await page.waitForSelector("button:has-text('Continue')");
-    await continueBtn.click();
-
-    await page.waitForSelector("gg-geeklist-item-edit-new");
-    const textarea = await page.waitForSelector("gg-geeklist-item-edit-new textarea[name='text']");
-    const body = renderBody(template, effectiveRow, boilerplate);
-    await textarea.fill(body);
-
-    const subscribeCheckbox = await page.waitForSelector("gg-geeklist-item-edit-new input[name='subs']");
-    await subscribeCheckbox.check();
-
-    if (opts.live) {
-      const saveBtn = await page.$("gg-geeklist-item-edit-new button:has-text('Save')");
-      await saveBtn.click();
-      await page.waitForSelector("gg-geeklist-item-edit-new", { state: "detached", timeout: 15000 });
-      posted++;
-      recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price);
-      console.log(`  Posted.`);
     } else {
-      const screenshotPath = path.join(ROOT, `dry-run-${i + 1}.png`);
-      await page.screenshot({ path: screenshotPath });
-      console.log(`  Dry run: filled form, screenshot saved to ${screenshotPath}`);
-      const cancelBtn = await page.$("gg-geeklist-item-edit-new button:has-text('Cancel')");
-      await cancelBtn.click();
-      await page.waitForSelector("gg-geeklist-item-edit-new", { state: "detached", timeout: 15000 });
+      for (const [i, row] of limited.entries()) {
+        console.log(`\n[${i + 1}/${limited.length}] ${row.game}`);
+        const result = await processRow(ctx, row, i + 1);
+        if (result === "posted") posted++;
+        // Skips return early, before anything was submitted, so no pacing delay.
+        if (result !== "skipped") await sleep(opts.delayMs + Math.floor(Math.random() * 1500));
+      }
     }
-
-    const jitter = Math.floor(Math.random() * 1500);
-    await sleep(opts.delayMs + jitter);
+  } finally {
+    await browser.close();
   }
 
-  await browser.close();
-
   console.log(`\nDone. ${opts.live ? `Posted ${posted} item(s).` : "Dry run complete, nothing was posted."}`);
-  if (skipped.length > 0) {
+  if (ctx.skipped.length > 0) {
     const skippedPath = path.join(ROOT, "skipped.csv");
-    fs.writeFileSync(skippedPath, stringify(skipped, { header: true }));
-    console.log(`${skipped.length} row(s) need manual attention — see ${skippedPath}`);
+    fs.writeFileSync(skippedPath, stringify(ctx.skipped, { header: true }));
+    console.log(`${ctx.skipped.length} row(s) need manual attention — see ${skippedPath}`);
   }
 }
 

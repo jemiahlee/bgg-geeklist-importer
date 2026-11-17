@@ -81,6 +81,19 @@ and every other previously posted item for the rest of the run, or post it again
 as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to the
 ledger. Delete an entry from `posted.json` (or the whole file) to forget it.
 
+## Interactive mode
+
+```sh
+bun run post -- --interactive --boilerplate boilerplate.txt [--live]
+```
+
+Instead of a CSV, you're prompted for a game name and its condition (blank for none),
+and each item goes through the same search, disambiguation, ledger check, price lookup
+and posting flow as a CSV row. Enter a blank name to finish. With `--no-check-prices`
+you're asked for the price directly. Unlike CSV mode, `--live` doesn't ask for an
+up-front confirmation, since there's no fixed batch. Skipped items are still written to
+`skipped.csv` on exit. `--interactive` (`-i`) can't be combined with `--csv`.
+
 ## Other flags (`post`)
 
 - `--skip-posted` — silently skip items already in the ledger (see above).
