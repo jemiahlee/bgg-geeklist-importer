@@ -212,6 +212,24 @@ async function ensureSubscribed(page, checkbox) {
   await checkbox.check();
 }
 
+// The form can also re-render after it appears, which silently wipes whatever
+// was typed into it, so a fill can't be trusted until it has been read back.
+// Fills the body and subscribes, retrying until both are still in place after
+// a pause; throws rather than let a blank item be saved.
+async function fillForm(page, form, body) {
+  const textarea = form.locator("textarea[name='text']");
+  const subscribe = form.locator("input[name='subs']");
+  const normalize = (text) => text.replace(/\r\n/g, "\n").trim();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await ensureSubscribed(page, subscribe);
+    await textarea.fill(body);
+    await page.waitForTimeout(600);
+    if (normalize(await textarea.inputValue()) === normalize(body) && (await subscribe.isChecked())) return;
+    console.log(`  Form was reset while filling it in; retrying (${attempt + 1}/5)...`);
+  }
+  throw new Error("The item form kept resetting; refusing to save it with an incomplete body.");
+}
+
 async function cancelAdd(page) {
   const cancelBtn = await page.$("button:has-text('Cancel')");
   if (cancelBtn) await cancelBtn.click();
@@ -325,8 +343,7 @@ async function processRow(ctx, row, shotNumber) {
   // detaches element handles grabbed too early ("Element is not attached").
   const form = page.locator("gg-geeklist-item-edit-new");
   await form.waitFor();
-  await form.locator("textarea[name='text']").fill(renderBody(template, effectiveRow, boilerplate));
-  await ensureSubscribed(page, form.locator("input[name='subs']"));
+  await fillForm(page, form, renderBody(template, effectiveRow, boilerplate));
 
   if (opts.live) {
     await form.locator("button:has-text('Save')").click();
