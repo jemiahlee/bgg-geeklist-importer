@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
+import { setRequestDelay } from "./pace.mjs";
 import { matchRows, gotoItem, readItemInfo, actionButton, itemUrl } from "./geeklist.mjs";
 import { loadHistory, removePosted } from "./history.mjs";
 import { collectOwnItems } from "./own.mjs";
@@ -28,6 +29,7 @@ function parseArgs() {
     else if (a === "--history") opts.history = path.resolve(args[++i]);
     else if (a === "--geeklist") opts.geeklist = args[++i];
     else if (a === "--rescan") opts.rescan = true;
+    else if (a === "--request-delay-ms") setRequestDelay(parseInt(args[++i], 10));
     else if (a === "--live") opts.live = true;
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
     else {

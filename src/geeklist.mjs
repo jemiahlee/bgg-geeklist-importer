@@ -1,4 +1,5 @@
 import { select } from "@inquirer/prompts";
+import { paced } from "./pace.mjs";
 
 // Item-level Edit/Delete live directly under the item's action bar. Scoping to
 // it (and matching the exact label) keeps comment buttons and "Mark Sold" out.
@@ -18,7 +19,7 @@ const ITEMS_PER_PAGE = 25;
 async function readPage(page, geeklistUrl, n, totals) {
   let result;
   for (let attempt = 0; attempt < 3; attempt++) {
-    await page.goto(`${pageBase(geeklistUrl)}?page=${n}`, { waitUntil: "networkidle" });
+    await paced(() => page.goto(`${pageBase(geeklistUrl)}?page=${n}`, { waitUntil: "networkidle" }));
     await page.waitForSelector("gg-geeklist-item", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(500);
     const text = await page.locator("body").innerText();
@@ -177,7 +178,7 @@ export async function matchRows(rows, ownItems) {
 // Jumps straight to the page holding the item (so page shifts after earlier
 // deletions don't matter) and returns its locator.
 export async function gotoItem(page, geeklistUrl, itemId) {
-  await page.goto(itemUrl(geeklistUrl, itemId), { waitUntil: "networkidle" });
+  await paced(() => page.goto(itemUrl(geeklistUrl, itemId), { waitUntil: "networkidle" }));
   const item = page.locator("gg-geeklist-item", { has: page.locator(`a#item${itemId}`) });
   await item.waitFor({ timeout: 15000 });
   return item;

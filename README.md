@@ -119,6 +119,7 @@ up-front confirmation, since there's no fixed batch. Skipped items are still wri
 - `--geeklist <url>` — defaults to the Portland flea market v2.0 list.
 - `--limit N` — only process the first N rows (good for testing).
 - `--delay-ms N` — base delay between items in milliseconds (default 4000, jittered).
+- `--request-delay-ms N` — minimum pause between page loads and lookups on BGG (default 3000, plus up to 50% random extra); see "Request pacing".
 - `--template <path>` / `--boilerplate <path>` / `--csv <path>` — override file locations.
 - `--no-check-prices` — skip the price lookup and use the CSV price as-is. By default,
   after you pick the right game, the importer looks up pricing data and lets
@@ -157,7 +158,7 @@ text are left alone. Like the other commands it is a dry run unless you pass `--
 which asks `y/n/a` before each edit (`a` edits that item and all the rest without
 asking; Enter alone means no) and saves from the same visit it read the item in. Use
 `--limit N` to try it on just the first N items that need updating; it stops as soon as
-it has them. Flags: `--geeklist`, `--history`, `--rescan`, `--delay-ms`.
+it has them. Flags: `--geeklist`, `--history`, `--rescan`, `--delay-ms`, `--request-delay-ms`.
 
 ## Repricing items
 
@@ -183,7 +184,16 @@ already at the new price are left alone. Rows that aren't a reduction, have no
 until you pass `--live`, which asks `y/n/a` before each edit (like `update-boilerplate`). Edited items also get
 their price updated in `posted.json`.
 
-Flags: `--csv`, `--geeklist`, `--history`, `--rescan`, `--live`, `--delay-ms`.
+Flags: `--csv`, `--geeklist`, `--history`, `--rescan`, `--live`, `--delay-ms`, `--request-delay-ms`.
+
+## Request pacing
+
+Every page load or lookup the importer makes on BGG goes through one shared pacer: it
+waits at least 3 seconds (plus up to 50% random extra) after the previous request
+finished, in every command and in dry runs too. That's roughly 15 requests a minute at
+most. Change it with `--request-delay-ms N` (any command); `--delay-ms` is a separate,
+longer pause after each item is posted, edited or deleted. A full read of the geeklist
+(`sync-ledger`, `--rescan`) takes a few minutes as a result.
 
 ## Which items the commands act on
 
@@ -215,4 +225,4 @@ match are listed in `skipped-delete.csv`.
 
 Try your first `--live` run with a one-row CSV.
 
-Flags: `--csv`, `--geeklist`, `--history`, `--rescan`, `--live`, `--delay-ms`.
+Flags: `--csv`, `--geeklist`, `--history`, `--rescan`, `--live`, `--delay-ms`, `--request-delay-ms`.

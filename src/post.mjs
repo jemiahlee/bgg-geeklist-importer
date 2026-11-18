@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
+import { setRequestDelay, paced } from "./pace.mjs";
 import { isValidPrice } from "./markup.mjs";
 import {
   searchBggCandidates,
@@ -48,6 +49,7 @@ function parseArgs() {
     else if (a === "--template") opts.template = path.resolve(args[++i]);
     else if (a === "--history") opts.history = path.resolve(args[++i]);
     else if (a === "--geeklist") opts.geeklist = args[++i];
+    else if (a === "--request-delay-ms") setRequestDelay(parseInt(args[++i], 10));
     else if (a === "--live") opts.live = true;
     else if (a === "--limit") opts.limit = parseInt(args[++i], 10);
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
@@ -426,7 +428,7 @@ async function main() {
   const pricePage = opts.checkPrices ? await context.newPage() : null;
   const page = await context.newPage();
 
-  await page.goto(opts.geeklist, { waitUntil: "networkidle" });
+  await paced(() => page.goto(opts.geeklist, { waitUntil: "networkidle" }));
 
   const ctx = { opts, page, pricePage, history, template, boilerplate, skipped: [], newEntries: [] };
   let posted = 0;

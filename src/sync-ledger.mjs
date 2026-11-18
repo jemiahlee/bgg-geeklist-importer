@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
+import { setRequestDelay } from "./pace.mjs";
 import { scanOwnItems, itemUrl } from "./geeklist.mjs";
 import { loadHistory, planSync, applySync } from "./history.mjs";
 
@@ -14,6 +15,7 @@ function parseArgs() {
     const a = args[i];
     if (a === "--history") opts.history = path.resolve(args[++i]);
     else if (a === "--geeklist") opts.geeklist = args[++i];
+    else if (a === "--request-delay-ms") setRequestDelay(parseInt(args[++i], 10));
     else if (a === "--write") opts.write = true;
     else {
       console.error(`Unknown argument: ${a}`);

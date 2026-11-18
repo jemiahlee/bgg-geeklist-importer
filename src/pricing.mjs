@@ -1,4 +1,5 @@
 import { USER_AGENT } from "./config.mjs";
+import { paced } from "./pace.mjs";
 
 const CONDITION_LABELS = ["New", "Like New", "Very Good", "Good", "Acceptable"];
 
@@ -25,12 +26,12 @@ function summarize(prices) {
 // full HTML search page instead of JSON.
 export async function searchBggCandidates(page, query) {
   const url = `https://boardgamegeek.com/search/boardgame?q=${encodeURIComponent(query)}&nosession=1&showcount=50&singular=1`;
-  const data = await page.evaluate(async (searchUrl) => {
+  const data = await paced(() => page.evaluate(async (searchUrl) => {
     const res = await fetch(searchUrl, {
       headers: { "X-Requested-With": "XMLHttpRequest", Accept: "application/json, text/plain, */*" },
     });
     return res.ok ? res.json() : null;
-  }, url);
+  }, url));
   return (data?.items ?? []).map((item) => ({ id: item.id, name: item.name, year: item.yearpublished }));
 }
 
@@ -62,7 +63,7 @@ export function matchBggOptions(candidates, labels) {
 // `page` is a long-lived tab owned by the caller: opening and closing a fresh
 // tab per lookup makes Chrome pull its window to the front each time.
 export async function getBggRecentSales(page, bggId, { limit = 15 } = {}) {
-  await page.goto(`https://boardgamegeek.com/market/pricehistory/thing/${bggId}`, { waitUntil: "networkidle" });
+  await paced(() => page.goto(`https://boardgamegeek.com/market/pricehistory/thing/${bggId}`, { waitUntil: "networkidle" }));
   await page.waitForSelector("table tbody tr", { timeout: 10000 }).catch(() => {});
   const rows = await page.$$eval("table tbody tr", (trs) =>
     trs
