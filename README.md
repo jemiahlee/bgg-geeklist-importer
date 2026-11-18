@@ -138,7 +138,7 @@ then prints every item's full new body (condition, price and all) for review. It
 without the old text are listed in `skipped-boilerplate.csv`; items that already have the
 new text are left alone. Like the other commands it is a dry run unless you pass
 `--live`, which asks for confirmation before editing and re-checks each item right
-before saving. Use `--limit N` to try it on the first N items first. Flags: `--geeklist`,
+before saving. Use `--limit N` to try it on just the first N items that need updating; it stops reading items once it has them. Flags: `--geeklist`,
 `--delay-ms`.
 
 ## Repricing items

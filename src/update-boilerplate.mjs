@@ -82,11 +82,13 @@ async function main() {
     const page = await context.newPage();
     console.log("\nScanning the geeklist for your items...");
     const own = await scanOwnItems(page, opts.geeklist);
-    console.log(`Found ${own.length} of your items. Reading each one...`);
+    console.log(`Found ${own.length} of your items. Reading ${opts.limit < own.length ? `them until ${opts.limit} need updating` : "each one"}...`);
 
     const plan = [];
     let already = 0;
     for (const item of own) {
+      // With a limit, stop reading once enough items are lined up.
+      if (plan.length >= opts.limit) break;
       const label = `${item.title} (item ${item.itemId})`;
       const body = lf(await readBody(page, opts.geeklist, item.itemId));
       const result = replaceBoilerplate(body, oldText, newText);
@@ -94,11 +96,7 @@ async function main() {
       else if (result.status === "missing") skipped.push({ itemId: item.itemId, title: item.title, reason: "old boilerplate text not found in the item" });
       else plan.push({ item, label, body, newBody: result.body });
     }
-    console.log(`${plan.length} item(s) to update, ${already} already have the new text, ${skipped.length} without the old text.`);
-    if (plan.length > opts.limit) {
-      plan.length = opts.limit;
-      console.log(`Limiting to the first ${plan.length}.`);
-    }
+    console.log(`${plan.length} item(s) to update, ${already} already have the new text, ${skipped.length} without the old text${plan.length >= opts.limit ? " (stopped at --limit)" : ""}.`);
 
     // Show each result in full (price, condition and all) so nothing is a surprise.
     for (const p of plan) {
