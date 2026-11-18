@@ -74,7 +74,7 @@ items to behave like a normal user, not a scraper.
 
 Every item posted with `--live` is recorded in `posted.json` (gitignored), grouped by
 geeklist. Each entry holds the item's geeklist item id (the `?itemid=` in its URL), its
-BGG game id, label, price and post time. The same game posted twice is two entries.
+BGG game id, label, price, post time and the boilerplate text it was posted with. The same game posted twice is two entries.
 Each CSV row is checked against the ledger by title before BGG is searched, so
 already-posted games don't trigger the disambiguation prompt. If a later run reaches an
 item that was already posted to the same geeklist, you're told when it was posted and
@@ -143,22 +143,33 @@ up-front confirmation, since there's no fixed batch. Skipped items are still wri
 ## Updating boilerplate
 
 ```sh
-bun run update-boilerplate -- --old old-boilerplate.txt --new new-boilerplate.txt [--live] [--limit N]
+bun run update-boilerplate -- --new new-boilerplate.txt [--old old-boilerplate.txt] [--live] [--limit N] [--recheck]
 ```
 
-Swaps the boilerplate text on items you've already posted. `--old` holds the text as it
-currently appears in your items and `--new` the replacement; each file is trimmed, like
-the boilerplate at post time. (If you've already edited `boilerplate.txt`, save the
-previous version to another file for `--old`.)
+Swaps the boilerplate text on items you've already posted. `--new` holds the
+replacement text; each file is trimmed, like the boilerplate at post time.
 
-It prints the old and new text, then goes through your items one at a time: reads the
-item, prints its full new body (condition, price and all), and moves on. Items without
-the old text are listed in `skipped-boilerplate.csv`; items that already have the new
+The ledger (`posted.json`) records the full boilerplate text each item was last known to
+contain, set when `post` posts it and when this command edits or inspects it. So you
+don't need to keep old boilerplate files around, and items recorded as already having the
+new text aren't visited at all: no request to BGG. Items with no record yet (everything
+posted before this was added) need `--old` once; it names the text they currently
+contain, and after that the ledger knows. Without `--old`, they're skipped and counted.
+
+It prints the old text(s) it will replace (from the ledger) and the new text, then goes
+through your items one at a time: reads the item, prints its full new body (condition,
+price and all), and moves on. Items that don't contain the expected old text are listed
+in `skipped-boilerplate.csv` (and their record is cleared); items that already have the new
 text are left alone. Like the other commands it is a dry run unless you pass `--live`,
-which asks `y/n/a` before each edit (`a` edits that item and all the rest without
-asking; Enter alone means no) and saves from the same visit it read the item in. Use
-`--limit N` to try it on just the first N items that need updating; it stops as soon as
-it has them. Flags: `--geeklist`, `--history`, `--rescan`, `--delay-ms`, `--request-delay-ms`.
+which asks `y/n/a` before each edit (`a` edits that item and all the rest without asking;
+Enter alone means no) and saves from the same visit it read the item in. Use `--limit N`
+to try it on just the first N items that need updating; it stops as soon as it has them.
+
+Records are trusted, so an item you edited by hand on BGG may be skipped wrongly (never
+edited wrongly: every edit re-reads the live item first). `--recheck` ignores the records
+and visits everything. Even a dry run updates the records with what it saw, since that
+only saves later requests. Flags: `--geeklist`, `--history`, `--rescan`, `--delay-ms`,
+`--request-delay-ms`.
 
 ## Repricing items
 

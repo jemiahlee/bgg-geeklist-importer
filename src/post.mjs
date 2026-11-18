@@ -351,7 +351,8 @@ async function processRow(ctx, row, shotNumber) {
   if (opts.live) {
     await form.locator("button:has-text('Save')").click();
     await form.waitFor({ state: "detached", timeout: 15000 });
-    const entry = recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price);
+    const bodyBoilerplate = template.includes("{{boilerplate}}") ? boilerplate.replace(/\r\n/g, "\n").trim() || null : null;
+    const entry = recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price, bodyBoilerplate);
     ctx.newEntries.push(entry);
     console.log(`  Posted.`);
     return "posted";

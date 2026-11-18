@@ -3,10 +3,12 @@ import fs from "node:fs";
 // Simple JSON ledger of what has been posted live, so re-running the importer
 // doesn't add the same BGG item to the same geeklist twice.
 //
-// Shape: { "<geeklistId>": { "<geeklist item id>": { itemId, id, label, postedAt, price } } }
+// Shape: { "<geeklistId>": { "<geeklist item id>": { itemId, id, label, postedAt, price, boilerplate } } }
 // `itemId` is the item's own id on the geeklist (the ?itemid= in its URL), which is
 // what lets the other commands go straight to an item without scanning the list;
 // `id` is the BGG game id. The same game can be listed twice, as two entries.
+// `boilerplate` is the full boilerplate text last known to be in the item's body (null
+// if unknown), which lets `update-boilerplate` skip items that need no change.
 // Entries from before item ids were recorded are keyed by BGG id (or
 // "label:<normalized label>") and have no itemId until `sync-ledger` fills it in.
 
@@ -64,7 +66,7 @@ function save(file, history) {
 
 // Records a new post and returns its entry. `item.itemId` may be unknown right
 // after posting; the entry is then keyed provisionally until `setItemId`.
-export function recordPosted(file, history, geeklistUrl, item, price) {
+export function recordPosted(file, history, geeklistUrl, item, price, boilerplate = null) {
   const list = (history[geeklistId(geeklistUrl)] ??= {});
   const entry = {
     itemId: item.itemId ? String(item.itemId) : null,
@@ -72,10 +74,22 @@ export function recordPosted(file, history, geeklistUrl, item, price) {
     label: item.label,
     postedAt: new Date().toISOString(),
     price,
+    boilerplate,
   };
   list[entry.itemId ?? `pending:${Date.now()}:${entry.id ?? normalizeLabel(entry.label)}`] = entry;
   save(file, history);
   return entry;
+}
+
+export function findByItemId(history, geeklistUrl, itemId) {
+  return entriesOf(history, geeklistUrl)[itemId] ?? null;
+}
+
+// Notes the boilerplate an entry's item now has (null = no longer known).
+export function setBoilerplate(file, history, entry, text) {
+  if (!entry || (entry.boilerplate ?? null) === text) return;
+  entry.boilerplate = text;
+  save(file, history);
 }
 
 // Gives an entry its geeklist item id, re-keying it under that id.

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { recordPosted, setItemId, findPosted, ledgerItems, planSync, applySync, updatePrice, removePosted } from "./history.mjs";
+import { recordPosted, setItemId, setBoilerplate, findByItemId, findPosted, ledgerItems, planSync, applySync, updatePrice, removePosted } from "./history.mjs";
 
 const URL = "https://boardgamegeek.com/geeklist/1/x";
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ledger-")), "posted.json");
@@ -62,4 +62,18 @@ test("planSync pairs an entry with no BGG id by title, ignoring the year", () =>
   const plan = planSync(h, URL, [{ itemId: "9", bggId: "42", title: "Jinns of the lake" }]);
   assert.equal(plan.assign.length, 1);
   assert.equal(plan.add.length, 0);
+});
+
+test("setBoilerplate records what an item contains and only writes on change", () => {
+  const file = tmp();
+  const h = {};
+  const e = recordPosted(file, h, URL, { id: "5", label: "Catan (1995)", itemId: "100" }, "20", "text A");
+  assert.equal(e.boilerplate, "text A");
+  const before = fs.statSync(file).mtimeMs;
+  setBoilerplate(file, h, e, "text A");
+  assert.equal(fs.statSync(file).mtimeMs, before);
+  setBoilerplate(file, h, e, "text B");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))["1"]["100"].boilerplate, "text B");
+  setBoilerplate(file, h, null, "ignored");
+  assert.equal(findByItemId(h, URL, "100"), e);
 });

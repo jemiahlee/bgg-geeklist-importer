@@ -28,6 +28,29 @@ export function applyReprice(body, newPrice) {
   });
 }
 
+// Decides whether an item needs a visit to swap its boilerplate, using what the
+// ledger recorded for it (`recorded`) and the optional --old text. `candidates`
+// are the texts the item may contain in place of the new one. No visit is made
+// when the item is recorded as already having the new text, or when nothing is
+// known about what it contains. `recheck` visits regardless of the record.
+export function planBoilerplateVisit({ recorded, oldText, newText, recheck = false }) {
+  const newB = newText.trim();
+  if (!recheck && recorded?.trim() === newB) return { visit: false, reason: "current" };
+  const candidates = [...new Set([recorded, oldText].filter(Boolean).map((t) => t.trim()))].filter((t) => t !== newB);
+  if (candidates.length === 0 && !recheck) return { visit: false, reason: "unknown" };
+  return { visit: true, candidates };
+}
+
+// Tries each candidate old text against the body: { status: "replaced", body,
+// from }, "already" or "missing" (see replaceBoilerplate).
+export function resolveBoilerplate(body, candidates, newText) {
+  for (const candidate of candidates) {
+    const result = replaceBoilerplate(body, candidate, newText);
+    if (result.status !== "missing") return { ...result, from: candidate };
+  }
+  return { status: body.includes(newText.trim()) ? "already" : "missing" };
+}
+
 // Swaps the boilerplate text in an item body for new text. Resolves to
 // { status: "replaced", body }, "already" (the new text is there and the old
 // isn't, so there's nothing to do) or "missing" (neither is).
