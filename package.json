@@ -8,7 +8,9 @@
     "post": "node src/post.mjs",
     "reprice": "node src/reprice.mjs",
     "update-boilerplate": "node src/update-boilerplate.mjs",
-    "delete": "node src/delete.mjs"
+    "delete": "node src/delete.mjs",
+    "sync-ledger": "node src/sync-ledger.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",

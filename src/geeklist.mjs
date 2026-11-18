@@ -50,11 +50,13 @@ async function readPage(page, geeklistUrl, n, totals) {
   throw new Error(`Page ${n} of the geeklist didn't load the expected items (got ${result.items.length}); stopping rather than act on a partial list.`);
 }
 
-// Walks every page of the geeklist and returns the items that belong to the
-// logged-in user (the only ones that show a Delete button).
-export async function scanOwnItems(page, geeklistUrl) {
+// Walks the geeklist a page at a time and yields the items that belong to the
+// logged-in user (the only ones that show a Delete button) as each page is read,
+// so callers can start work, and stop early, without waiting for the whole list.
+// Once the walk completes it checks itself against the reported item total and
+// throws rather than let a caller believe it saw a partial list in full.
+export async function* iterateOwnItems(page, geeklistUrl) {
   const seen = new Set();
-  const own = [];
   let totals = null;
   for (let n = 1; ; n++) {
     const result = await readPage(page, geeklistUrl, n, totals);
@@ -63,23 +65,54 @@ export async function scanOwnItems(page, geeklistUrl) {
       if (!i.itemId || seen.has(i.itemId)) continue;
       seen.add(i.itemId);
       if (!i.own) continue;
-      own.push({
+      yield {
         itemId: i.itemId,
         bggId: i.href.split("/")[2] ?? null,
         title: i.heading.replace(/^\d+\.\s*/, ""),
         comments: i.comments,
-      });
+      };
     }
     if (n >= totals.lastPage) break;
   }
   if (seen.size !== totals.total) {
     throw new Error(`Scanned ${seen.size} items but the geeklist reports ${totals.total}; stopping rather than act on a partial list.`);
   }
+}
+
+export async function scanOwnItems(page, geeklistUrl) {
+  const own = [];
+  for await (const item of iterateOwnItems(page, geeklistUrl)) own.push(item);
   return own;
 }
 
+// Finds the geeklist item ids of items just posted. New items go on the end of
+// the list, so this walks backwards from the last page, handing each of the
+// user's newest items to the latest unresolved entry of `pending` ({ bggId })
+// for the same game. Items in `known` (ids the ledger already has) are never
+// taken. Returns itemIds aligned with `pending`; null where nothing was found.
+export async function findNewItemIds(page, geeklistUrl, pending, known, { maxPages = 6 } = {}) {
+  const found = pending.map(() => null);
+  const unresolved = () => found.some((id, i) => id === null && pending[i].bggId);
+  const first = await readPage(page, geeklistUrl, 1);
+  const totals = { total: first.total, lastPage: first.lastPage };
+  for (let n = totals.lastPage; n >= 1 && n > totals.lastPage - maxPages && unresolved(); n--) {
+    const { items } = n === 1 ? first : await readPage(page, geeklistUrl, n, totals);
+    for (const item of [...items].reverse()) {
+      const bggId = item.href.split("/")[2];
+      if (!item.own || !item.itemId || known.has(item.itemId)) continue;
+      let slot = -1;
+      for (let i = pending.length - 1; i >= 0; i--) {
+        if (found[i] === null && pending[i].bggId === bggId) { slot = i; break; }
+      }
+      if (slot >= 0) found[slot] = item.itemId;
+    }
+  }
+  return found;
+}
+
+// Ledger labels carry the year ("Nippon (2015)"), CSV rows usually don't.
 function normalize(s) {
-  return s
+  return s.replace(/\s*\(\d{4}\)\s*$/, "")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
@@ -177,11 +210,59 @@ export async function saveEditor(form) {
   await form.waitFor({ state: "detached", timeout: 15000 });
 }
 
-// Reads the item's body from its editor, then closes the editor without saving.
-export async function readBody(page, geeklistUrl, itemId) {
-  const item = await gotoItem(page, geeklistUrl, itemId);
-  const { form, textarea } = await openEditor(item);
-  const body = await textarea.inputValue();
-  await cancelEditor(form);
-  return body;
+// What the item on screen says about itself, to check it is the item we think it is.
+export async function readItemInfo(item) {
+  return item.evaluate(
+    (el, sel) => {
+      const comments = [...el.querySelectorAll("button")].map((b) => b.textContent.match(/View (\d+) Comment/)).find(Boolean);
+      return {
+        bggId: el.querySelector("h2 a[href^='/boardgame']")?.getAttribute("href").split("/")[2] ?? null,
+        title: el.querySelector("h2")?.textContent.replace(/\s+/g, " ").trim().replace(/^\d+\.\s*/, "") ?? "",
+        own: [...el.querySelectorAll(sel)].some((b) => b.textContent.trim() === "Delete"),
+        comments: comments ? Number(comments[1]) : 0,
+      };
+    },
+    ACTION_BAR_BUTTONS
+  );
+}
+
+// The editor may hand back CRLF line endings; compare and write with LF.
+export const lf = (text) => text.replace(/\r\n/g, "\n");
+
+// Visits one item, checks it is the item expected (`expected.bggId`, when known),
+// opens its editor and passes the body (LF-normalised) to `decide`. `decide`
+// returns { newBody } to have it saved, or null to leave the item alone. A save
+// is only made after reading the textarea back to confirm the form kept the text.
+//
+// Resolves to { status: "saved" | "left" | "failed", reason?, info }. "failed"
+// means the item couldn't be edited (gone, not yours, not the expected game, the
+// form lost the text); "left" means `decide` chose not to change it.
+export async function editItemBody(page, geeklistUrl, expected, decide) {
+  let item, info, form, textarea;
+  try {
+    item = await gotoItem(page, geeklistUrl, expected.itemId);
+    info = await readItemInfo(item);
+    if (expected.bggId && info.bggId && info.bggId !== String(expected.bggId)) {
+      return { status: "failed", info, reason: `item ${expected.itemId} is BGG game ${info.bggId} ("${info.title}"), not ${expected.bggId} as recorded` };
+    }
+    ({ form, textarea } = await openEditor(item));
+  } catch (err) {
+    return { status: "failed", info, reason: `couldn't open item ${expected.itemId} for editing: ${err.message.split("\n")[0]}` };
+  }
+  try {
+    const body = lf(await textarea.inputValue());
+    const decision = await decide(body, info);
+    if (!decision) return { status: "left", info };
+    await textarea.fill(decision.newBody);
+    // A fill can be lost if the form re-renders; never save unless it took.
+    await page.waitForTimeout(600);
+    if (lf(await textarea.inputValue()) !== decision.newBody) {
+      return { status: "failed", info, reason: "the form did not keep the new text" };
+    }
+    await saveEditor(form);
+    form = null;
+    return { status: "saved", info };
+  } finally {
+    if (form) await cancelEditor(form).catch(() => {});
+  }
 }

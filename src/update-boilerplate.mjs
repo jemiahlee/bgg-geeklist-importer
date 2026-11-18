@@ -1,11 +1,13 @@
 import { stringify } from "csv-stringify/sync";
-import { expand } from "@inquirer/prompts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
-import { scanOwnItems, gotoItem, openEditor, cancelEditor, saveEditor, readBody, itemUrl } from "./geeklist.mjs";
+import { editItemBody, lf, itemUrl } from "./geeklist.mjs";
 import { replaceBoilerplate } from "./markup.mjs";
+import { loadHistory } from "./history.mjs";
+import { ownItems } from "./own.mjs";
+import { makeApprover, APPROVER_HELP } from "./prompts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -16,6 +18,8 @@ function parseArgs() {
     old: null,
     new: null,
     geeklist: DEFAULT_GEEKLIST,
+    history: path.join(ROOT, "posted.json"),
+    rescan: false,
     live: false,
     limit: Infinity,
     delayMs: 4000,
@@ -25,6 +29,8 @@ function parseArgs() {
     if (a === "--old") opts.old = path.resolve(args[++i]);
     else if (a === "--new") opts.new = path.resolve(args[++i]);
     else if (a === "--geeklist") opts.geeklist = args[++i];
+    else if (a === "--history") opts.history = path.resolve(args[++i]);
+    else if (a === "--rescan") opts.rescan = true;
     else if (a === "--live") opts.live = true;
     else if (a === "--limit") opts.limit = parseInt(args[++i], 10);
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
@@ -37,9 +43,6 @@ function parseArgs() {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// The editor may hand back CRLF line endings; compare and write with LF.
-const lf = (text) => text.replace(/\r\n/g, "\n");
 
 function readText(file, flag) {
   if (!file) {
@@ -76,85 +79,61 @@ async function main() {
   console.log(indent(newText));
   console.log(opts.live ? "\nMode: LIVE — items will actually be edited." : "\nMode: DRY RUN — nothing is edited. Pass --live to edit for real.");
 
+  const history = loadHistory(opts.history);
   const skipped = [];
+  const approve = makeApprover();
+  let planned = 0;
+  let already = 0;
+  let edited = 0;
   const { browser, context } = await launchSession();
   try {
     const page = await context.newPage();
-    console.log("\nScanning the geeklist for your items...");
-    const own = await scanOwnItems(page, opts.geeklist);
-    console.log(`Found ${own.length} of your items. Reading ${opts.limit < own.length ? `them until ${opts.limit} need updating` : "each one"}...`);
+    if (opts.live) console.log(`\n${APPROVER_HELP}`);
+    console.log(`\n${opts.rescan ? "Reading the geeklist" : "Using the ledger"} for your items; each one is checked as it is reached.`);
 
-    const plan = [];
-    let already = 0;
-    for (const item of own) {
-      // With a limit, stop reading once enough items are lined up.
-      if (plan.length >= opts.limit) break;
+    // Items are handled one at a time, as they are found: read, show the new
+    // body (condition, price and all), and in live mode ask and save.
+    for await (const item of ownItems(page, history, opts.geeklist, { rescan: opts.rescan })) {
+      if (planned >= opts.limit) break;
       const label = `${item.title} (item ${item.itemId})`;
-      const body = lf(await readBody(page, opts.geeklist, item.itemId));
-      const result = replaceBoilerplate(body, oldText, newText);
-      if (result.status === "already") already++;
-      else if (result.status === "missing") skipped.push({ itemId: item.itemId, title: item.title, reason: "old boilerplate text not found in the item" });
-      else plan.push({ item, label, body, newBody: result.body });
-    }
-    console.log(`${plan.length} item(s) to update, ${already} already have the new text, ${skipped.length} without the old text${plan.length >= opts.limit ? " (stopped at --limit)" : ""}.`);
-
-    // Show each result in full (price, condition and all) so nothing is a surprise.
-    for (const p of plan) {
-      console.log(`\n  ${p.label} — ${itemUrl(opts.geeklist, p.item.itemId)}`);
-      console.log(indent(p.newBody));
-    }
-
-    let edited = 0;
-    if (plan.length > 0 && !opts.live) {
-      console.log("\nDry run: nothing was edited.");
-    } else if (plan.length > 0) {
-      console.log(`\nYou'll be asked before each edit: y = edit this item, n = skip it, a = edit it and all the rest without asking.`);
-      let all = false;
-      for (const p of plan) {
-        if (!all) {
-          // Enter alone means "no", so a stray keypress can't edit a live item.
-          const answer = await expand({
-            message: `Edit ${p.label}?`,
-            default: "n",
-            choices: [
-              { key: "y", name: "Yes, edit this item", value: "y" },
-              { key: "n", name: "No, skip this item", value: "n" },
-              { key: "a", name: "All: edit this and every remaining item without asking", value: "a" },
-            ],
-          });
-          if (answer === "n") {
-            console.log(`  Skipped.`);
-            skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "declined at the prompt" });
-            continue;
-          }
-          if (answer === "a") all = true;
+      const result = await editItemBody(page, opts.geeklist, item, async (rawBody) => {
+        const body = lf(rawBody);
+        const replaced = replaceBoilerplate(body, oldText, newText);
+        if (replaced.status === "already") {
+          already++;
+          console.log(`\n  ${label}: already has the new text.`);
+          return null;
         }
-        console.log(`\nEditing ${p.label}...`);
-        const item = await gotoItem(page, opts.geeklist, p.item.itemId);
-        const { form, textarea } = await openEditor(item);
-        if (lf(await textarea.inputValue()) !== p.body) {
-          console.log(`  The item changed since it was read. Skipping.`);
-          skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "item changed during the run" });
-          await cancelEditor(form);
-          continue;
+        if (replaced.status === "missing") {
+          console.log(`\n  ${label}: old boilerplate text not found; skipping.`);
+          skipped.push({ itemId: item.itemId, title: item.title, reason: "old boilerplate text not found in the item" });
+          return null;
         }
-        await textarea.fill(p.newBody);
-        // A fill can be lost if the form re-renders; never save unless it took.
-        await page.waitForTimeout(600);
-        if (lf(await textarea.inputValue()) !== p.newBody) {
-          console.log(`  The edit didn't take. Skipping.`);
-          skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "form did not keep the new text" });
-          await cancelEditor(form);
-          continue;
+        planned++;
+        console.log(`\n  ${label} — ${itemUrl(opts.geeklist, item.itemId)}`);
+        console.log(indent(replaced.body));
+        if (!opts.live) return null;
+        if (!(await approve(`Edit ${label}?`))) {
+          console.log(`  Skipped.`);
+          skipped.push({ itemId: item.itemId, title: item.title, reason: "declined at the prompt" });
+          return null;
         }
-        await saveEditor(form);
+        return { newBody: replaced.body };
+      });
+      if (result.status === "saved") {
         edited++;
         console.log(`  Saved.`);
         await sleep(opts.delayMs + Math.floor(Math.random() * 1500));
+      } else if (result.status === "failed") {
+        console.log(`\n  ${label}: ${result.reason}. Skipping.`);
+        skipped.push({ itemId: item.itemId, title: item.title, reason: result.reason });
       }
     }
 
-    console.log(`\nDone. ${opts.live ? `Edited ${edited} item(s).` : "Dry run complete."}`);
+    console.log(
+      `\nDone. ${planned} item(s) needed the new text${planned >= opts.limit ? " (stopped at --limit)" : ""}; ${already} already had it; ${skipped.length} skipped. ` +
+        (opts.live ? `Edited ${edited}.` : "Dry run: nothing was edited. Pass --live to edit for real.")
+    );
   } finally {
     await browser.close();
   }

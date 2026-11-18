@@ -16,7 +16,8 @@ import {
   searchNobleKnight,
   matchNobleKnightItems,
 } from "./pricing.mjs";
-import { loadHistory, findPosted, findPostedByTitle, recordPosted } from "./history.mjs";
+import { findNewItemIds } from "./geeklist.mjs";
+import { geeklistId, loadHistory, findPosted, findPostedByTitle, recordPosted, setItemId } from "./history.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -348,7 +349,8 @@ async function processRow(ctx, row, shotNumber) {
   if (opts.live) {
     await form.locator("button:has-text('Save')").click();
     await form.waitFor({ state: "detached", timeout: 15000 });
-    recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price);
+    const entry = recordPosted(opts.history, history, opts.geeklist, chosen, effectiveRow.price);
+    ctx.newEntries.push(entry);
     console.log(`  Posted.`);
     return "posted";
   }
@@ -359,6 +361,23 @@ async function processRow(ctx, row, shotNumber) {
   await form.locator("button:has-text('Cancel')").click();
   await form.waitFor({ state: "detached", timeout: 15000 });
   return "dry-run";
+}
+
+// The geeklist doesn't say which item a Save created, so once the run is over the
+// new items' ids are read off the end of the list, one lookup for the whole batch.
+async function recordItemIds(ctx) {
+  const { opts, page, history, newEntries } = ctx;
+  const pending = newEntries.filter((e) => !e.itemId);
+  if (pending.length === 0) return;
+  console.log(`\nLooking up the geeklist item id${pending.length === 1 ? "" : "s"} of ${pending.length} new item(s)...`);
+  const known = new Set(Object.values(history[geeklistId(opts.geeklist)] ?? {}).map((e) => e.itemId).filter(Boolean));
+  const ids = await findNewItemIds(page, opts.geeklist, pending.map((e) => ({ bggId: e.id })), known);
+  let missed = 0;
+  for (const [i, entry] of pending.entries()) {
+    if (ids[i]) setItemId(opts.history, history, opts.geeklist, entry, ids[i]);
+    else missed++;
+  }
+  if (missed > 0) console.warn(`${missed} item(s) couldn't be found yet; run "bun run sync-ledger -- --write" to record their ids.`);
 }
 
 async function main() {
@@ -409,7 +428,7 @@ async function main() {
 
   await page.goto(opts.geeklist, { waitUntil: "networkidle" });
 
-  const ctx = { opts, page, pricePage, history, template, boilerplate, skipped: [] };
+  const ctx = { opts, page, pricePage, history, template, boilerplate, skipped: [], newEntries: [] };
   let posted = 0;
 
   try {
@@ -433,6 +452,7 @@ async function main() {
       }
     }
   } finally {
+    await recordItemIds(ctx).catch((err) => console.warn(`\nCouldn't look up the new items' ids (${err.message}). Run "bun run sync-ledger -- --write" later.`));
     await browser.close();
   }
 

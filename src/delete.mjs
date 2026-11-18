@@ -5,8 +5,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
-import { scanOwnItems, matchRows, gotoItem, actionButton, itemUrl } from "./geeklist.mjs";
-import { loadHistory, findPosted, removePosted } from "./history.mjs";
+import { matchRows, gotoItem, readItemInfo, actionButton, itemUrl } from "./geeklist.mjs";
+import { loadHistory, removePosted } from "./history.mjs";
+import { collectOwnItems } from "./own.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -17,6 +18,7 @@ function parseArgs() {
     csv: path.join(ROOT, "delete.csv"),
     history: path.join(ROOT, "posted.json"),
     geeklist: DEFAULT_GEEKLIST,
+    rescan: false,
     live: false,
     delayMs: 4000,
   };
@@ -25,6 +27,7 @@ function parseArgs() {
     if (a === "--csv") opts.csv = path.resolve(args[++i]);
     else if (a === "--history") opts.history = path.resolve(args[++i]);
     else if (a === "--geeklist") opts.geeklist = args[++i];
+    else if (a === "--rescan") opts.rescan = true;
     else if (a === "--live") opts.live = true;
     else if (a === "--delay-ms") opts.delayMs = parseInt(args[++i], 10);
     else {
@@ -40,8 +43,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Clicks the item's own Delete button and confirms BGG's follow-up dialog, if
 // any. Throws if the item is still there afterwards, so a failed or unexpected
 // dialog stops the run instead of carrying on blind.
-async function deleteItem(page, geeklistUrl, itemId) {
-  const item = await gotoItem(page, geeklistUrl, itemId);
+async function deleteItem(page, item, itemId) {
   const button = await actionButton(item, "Delete");
 
   page.once("dialog", (dialog) => dialog.accept());
@@ -83,53 +85,77 @@ async function main() {
   const { browser, context } = await launchSession();
   try {
     const page = await context.newPage();
-    console.log("Scanning the geeklist for your items...");
-    const own = await scanOwnItems(page, opts.geeklist);
-    console.log(`Found ${own.length} of your items.`);
+    if (opts.rescan) console.log("Reading the geeklist for your items...");
+    const own = await collectOwnItems(page, history, opts.geeklist, { rescan: opts.rescan });
+    console.log(`${own.length} of your items to match against.`);
 
     const { matches, unmatched } = await matchRows(rows, own);
     for (const u of unmatched) skipped.push({ ...u.row, reason: u.reason });
 
     if (matches.length > 0) {
-      console.log(`\n${matches.length} item(s) to delete:`);
+      console.log(`\n${matches.length} item(s) to delete (each is checked against the live item before anything happens):`);
       for (const { item } of matches) {
-        const prior = findPosted(history, opts.geeklist, { id: item.bggId, label: item.title });
-        const notes = [
-          prior?.price ? `listed at $${prior.price}` : null,
-          item.comments > 0 ? `HAS ${item.comments} COMMENT(S)` : null,
-        ].filter(Boolean);
-        console.log(`  ${item.title}${notes.length ? ` [${notes.join("; ")}]` : ""}\n    ${itemUrl(opts.geeklist, item.itemId)}`);
+        const price = item.entry?.price;
+        console.log(`  ${item.title}${price ? ` [listed at $${price}]` : ""}\n    ${itemUrl(opts.geeklist, item.itemId)}`);
       }
     }
 
     let deleted = 0;
-    if (matches.length > 0 && !opts.live) {
-      console.log("\nDry run: nothing was deleted.");
-    } else if (matches.length > 0) {
-      const proceed = await confirm({
-        message: `\nPermanently delete ${matches.length} item(s)? This cannot be undone.`,
+    let proceed = false;
+    if (matches.length > 0 && opts.live) {
+      proceed = await confirm({
+        message: `\nPermanently delete up to ${matches.length} item(s)? This cannot be undone.`,
         default: false,
       });
-      if (!proceed) {
-        console.log("Aborted.");
-      } else {
-        for (const { row, item } of matches) {
-          console.log(`\nDeleting ${item.title}...`);
-          try {
-            await deleteItem(page, opts.geeklist, item.itemId);
-          } catch (err) {
-            console.error(`  Stopping: ${err.message}`);
-            skipped.push({ ...row, reason: `${item.title}: ${err.message}` });
-            break;
-          }
-          deleted++;
-          removePosted(opts.history, history, opts.geeklist, { id: item.bggId, label: item.title });
-          console.log(`  Deleted.`);
-          await sleep(opts.delayMs + Math.floor(Math.random() * 1500));
+      if (!proceed) console.log("Aborted.");
+    }
+    // Each item is visited and compared with what we expect before it is touched.
+    for (const { row, item } of proceed || !opts.live ? matches : []) {
+      let live;
+      try {
+        live = await gotoItem(page, opts.geeklist, item.itemId);
+      } catch {
+        console.log(`\n${item.title}: item ${item.itemId} isn't on the geeklist. Skipping.`);
+        skipped.push({ ...row, reason: `${item.title}: item ${item.itemId} not found on the geeklist` });
+        continue;
+      }
+      const info = await readItemInfo(live);
+      if (!info.own) {
+        console.log(`\n${item.title}: item ${item.itemId} isn't yours. Skipping.`);
+        skipped.push({ ...row, reason: `${item.title}: item ${item.itemId} is not yours` });
+        continue;
+      }
+      if (item.bggId && info.bggId && info.bggId !== String(item.bggId)) {
+        console.log(`\n${item.title}: item ${item.itemId} is "${info.title}", not the game recorded. Skipping.`);
+        skipped.push({ ...row, reason: `${item.title}: item ${item.itemId} is "${info.title}" (BGG ${info.bggId}), not ${item.bggId} as recorded` });
+        continue;
+      }
+      if (!opts.live) {
+        console.log(`\n${item.title}: found${info.comments > 0 ? `, HAS ${info.comments} COMMENT(S)` : ""}. Would delete.`);
+        continue;
+      }
+      if (info.comments > 0) {
+        const ok = await confirm({ message: `\n${item.title} has ${info.comments} comment(s). Delete it anyway?`, default: false });
+        if (!ok) {
+          skipped.push({ ...row, reason: `${item.title}: has comments, declined at the prompt` });
+          continue;
         }
       }
+      console.log(`\nDeleting ${item.title}...`);
+      try {
+        await deleteItem(page, live, item.itemId);
+      } catch (err) {
+        console.error(`  Stopping: ${err.message}`);
+        skipped.push({ ...row, reason: `${item.title}: ${err.message}` });
+        break;
+      }
+      deleted++;
+      removePosted(opts.history, history, opts.geeklist, { itemId: item.itemId, id: item.bggId, label: item.title });
+      console.log(`  Deleted.`);
+      await sleep(opts.delayMs + Math.floor(Math.random() * 1500));
     }
 
+    if (matches.length > 0 && !opts.live) console.log("\nDry run: nothing was deleted.");
     console.log(`\nDone. ${opts.live ? `Deleted ${deleted} item(s).` : "Dry run complete."}`);
   } finally {
     await browser.close();

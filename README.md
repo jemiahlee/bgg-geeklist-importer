@@ -12,6 +12,7 @@ this uses your real installed Chrome rather than an API client.)
 | `bun run reprice` | Strike through old prices and add new ones ([Repricing items](#repricing-items)). |
 | `bun run update-boilerplate` | Swap the boilerplate text on posted items ([Updating boilerplate](#updating-boilerplate)). |
 | `bun run delete` | Permanently delete items ([Deleting items](#deleting-items)). |
+| `bun run sync-ledger` | Record geeklist item ids in `posted.json` ([Syncing the ledger](#syncing-the-ledger)). |
 
 All of these except `login` are dry runs until you pass `--live`.
 
@@ -71,16 +72,32 @@ items to behave like a normal user, not a scraper.
 
 ## Duplicate protection
 
-Every item posted with `--live` is recorded in `posted.json` (gitignored), keyed by
-geeklist and the BGG ID of the item you picked (so distinct games that share a name and
-year, like the two "Flowers (2024)", are tracked separately). Each CSV row is checked
-against the ledger by title before BGG is searched, so already-posted games don't
-trigger the disambiguation prompt. If a later run reaches an item that was already
-posted to the same geeklist, you're told when it was posted and can skip it, skip it
-and every other previously posted item for the rest of the run, or post it again. Pass
-`--skip-posted` to skip them all without being asked, so the same CSV can be re-run
-as-is (e.g. after adding rows or fixing skipped ones). Dry runs never write to the
-ledger. Delete an entry from `posted.json` (or the whole file) to forget it.
+Every item posted with `--live` is recorded in `posted.json` (gitignored), grouped by
+geeklist. Each entry holds the item's geeklist item id (the `?itemid=` in its URL), its
+BGG game id, label, price and post time. The same game posted twice is two entries.
+Each CSV row is checked against the ledger by title before BGG is searched, so
+already-posted games don't trigger the disambiguation prompt. If a later run reaches an
+item that was already posted to the same geeklist, you're told when it was posted and
+can skip it, skip it and every other previously posted item for the rest of the run, or
+post it again. Pass `--skip-posted` to skip them all without being asked, so the same
+CSV can be re-run as-is (e.g. after adding rows or fixing skipped ones). Dry runs never
+write to the ledger. Delete an entry from `posted.json` (or the whole file) to forget it.
+
+BGG doesn't say which item a Save created, so `post` looks up the new items' ids on the
+end of the list once the run is over (one lookup for the whole batch).
+
+## Syncing the ledger
+
+```sh
+bun run sync-ledger            # dry run: shows what would change
+bun run sync-ledger -- --write # updates posted.json
+```
+
+Reads the whole geeklist once and reconciles `posted.json` with it: entries from before
+item ids were recorded get theirs, and items of yours that the ledger has never seen are
+added (without a price or post date). Entries whose item is no longer on the list are
+reported and left alone. It only changes the local ledger, never BGG. Run it once to
+upgrade an old ledger, and again whenever you've added or removed items by hand.
 
 ## Interactive mode
 
@@ -133,13 +150,14 @@ currently appears in your items and `--new` the replacement; each file is trimme
 the boilerplate at post time. (If you've already edited `boilerplate.txt`, save the
 previous version to another file for `--old`.)
 
-It prints the old and new text, scans the geeklist for your items, reads each one, and
-then prints every item's full new body (condition, price and all) for review. Items
-without the old text are listed in `skipped-boilerplate.csv`; items that already have the
-new text are left alone. Like the other commands it is a dry run unless you pass
-`--live`, which asks `y/n/a` before each edit (`a` edits that item and all the rest
-without asking; Enter alone means no) and re-checks each item right before saving. Use `--limit N` to try it on just the first N items that need updating; it stops reading items once it has them. Flags: `--geeklist`,
-`--delay-ms`.
+It prints the old and new text, then goes through your items one at a time: reads the
+item, prints its full new body (condition, price and all), and moves on. Items without
+the old text are listed in `skipped-boilerplate.csv`; items that already have the new
+text are left alone. Like the other commands it is a dry run unless you pass `--live`,
+which asks `y/n/a` before each edit (`a` edits that item and all the rest without
+asking; Enter alone means no) and saves from the same visit it read the item in. Use
+`--limit N` to try it on just the first N items that need updating; it stops as soon as
+it has them. Flags: `--geeklist`, `--history`, `--rescan`, `--delay-ms`.
 
 ## Repricing items
 
@@ -162,15 +180,22 @@ It compares against what is on BGG, so re-running the same CSV is harmless: item
 already at the new price are left alone. Rows that aren't a reduction, have no
 `Price:` line, or don't match one of your items are skipped and listed in
 `skipped-reprice.csv`. Like posting, it is a dry run (it prints the planned edits)
-until you pass `--live`, which asks for confirmation first. Edited items also get
+until you pass `--live`, which asks `y/n/a` before each edit (like `update-boilerplate`). Edited items also get
 their price updated in `posted.json`.
 
-Flags: `--csv`, `--geeklist`, `--history`, `--live`, `--delay-ms`.
+Flags: `--csv`, `--geeklist`, `--history`, `--rescan`, `--live`, `--delay-ms`.
 
-Both `reprice` and `delete` first scan every page of the geeklist to find your items
-(they only act on items you posted), which takes a minute or so. The scan checks
-itself against the total item count BGG reports, and stops with an error rather than
-act on a partial list. They use the same saved login as `post`.
+## Which items the commands act on
+
+`reprice`, `delete` and `update-boilerplate` only act on items you posted. They find
+them in `posted.json` (see "Syncing the ledger"), so they don't read the geeklist to
+look for them, and they go straight to each item's page. Every item is checked when it
+is visited: it must still exist, be yours, and be the BGG game the ledger says it is,
+or it is skipped and listed. Pass `--rescan` to read the geeklist page by page instead,
+for items you added by hand (the read stops early when `--limit` is reached; the
+whole-list check against BGG's item total runs only if it reaches the end). Ledger
+entries with no item id are skipped until `sync-ledger` has run. They use the same
+saved login as `post`.
 
 ## Deleting items
 
@@ -179,9 +204,10 @@ undo.** It reads a CSV with `game` (or `bgg_id`); see `delete.sample.csv`. The d
 is `delete.csv`.
 
 It finds your matching items the same way `reprice` does, then prints exactly what it
-would delete (title, link, the price from `posted.json`, and a warning if the item has
-comments). Nothing is deleted until you pass `--live` and answer yes to a confirmation
-that defaults to no. It only ever clicks an item's own Delete button, never Mark Sold.
+would delete (title, link and the price from `posted.json`), then checks each item on
+the live geeklist as it reaches it. Nothing is deleted until you pass `--live` and answer yes to a confirmation
+that defaults to no; an item with comments gets its own confirmation, also defaulting to
+no. It only ever clicks an item's own Delete button, never Mark Sold.
 If anything unexpected happens (a button or dialog it doesn't recognise, an item that
 is still there afterwards) it stops instead of continuing. Deleted items are removed
 from `posted.json`, so a later post won't think they're still listed. Rows that don't
@@ -189,4 +215,4 @@ match are listed in `skipped-delete.csv`.
 
 Try your first `--live` run with a one-row CSV.
 
-Flags: `--csv`, `--geeklist`, `--history`, `--live`, `--delay-ms`.
+Flags: `--csv`, `--geeklist`, `--history`, `--rescan`, `--live`, `--delay-ms`.
