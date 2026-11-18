@@ -27,3 +27,14 @@ export function applyReprice(body, newPrice) {
     return `${prefix}${[...kept, `[-]${current}[/-]`, `$${newPrice.trim()}`].join(" ")}`;
   });
 }
+
+// Swaps the boilerplate text in an item body for new text. Resolves to
+// { status: "replaced", body }, "already" (the new text is there and the old
+// isn't, so there's nothing to do) or "missing" (neither is).
+export function replaceBoilerplate(body, oldText, newText) {
+  const oldB = oldText.trim();
+  const newB = newText.trim();
+  if (body.includes(newB) && !oldB.includes(newB)) return { status: "already" };
+  if (!body.includes(oldB)) return { status: "missing" };
+  return { status: "replaced", body: body.split(oldB).join(newB) };
+}

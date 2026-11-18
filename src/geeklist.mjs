@@ -176,3 +176,12 @@ export async function saveEditor(form) {
   await form.locator("button:visible", { hasText: /^\s*Save\s*$/ }).click();
   await form.waitFor({ state: "detached", timeout: 15000 });
 }
+
+// Reads the item's body from its editor, then closes the editor without saving.
+export async function readBody(page, geeklistUrl, itemId) {
+  const item = await gotoItem(page, geeklistUrl, itemId);
+  const { form, textarea } = await openEditor(item);
+  const body = await textarea.inputValue();
+  await cancelEditor(form);
+  return body;
+}

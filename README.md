@@ -10,9 +10,10 @@ this uses your real installed Chrome rather than an API client.)
 | `bun run login` | Save your BGG login session (once, and when it expires). |
 | `bun run post` | Add items from a CSV ([sections 2–4](#2-prepare-your-input-files)). |
 | `bun run reprice` | Strike through old prices and add new ones ([Repricing items](#repricing-items)). |
+| `bun run update-boilerplate` | Swap the boilerplate text on posted items ([Updating boilerplate](#updating-boilerplate)). |
 | `bun run delete` | Permanently delete items ([Deleting items](#deleting-items)). |
 
-All three are dry runs until you pass `--live`.
+All of these except `login` are dry runs until you pass `--live`.
 
 ## Setup
 
@@ -120,6 +121,25 @@ up-front confirmation, since there's no fixed batch. Skipped items are still wri
   or `24.99` (no `$`); anything else is rejected and you're asked again. Type `skip`
   instead of a price to skip the item; it's listed in `skipped.csv` for later. With
   `--no-check-prices` there is no prompt, so make sure the CSV prices are valid.
+
+## Updating boilerplate
+
+```sh
+bun run update-boilerplate -- --old old-boilerplate.txt --new new-boilerplate.txt [--live] [--limit N]
+```
+
+Swaps the boilerplate text on items you've already posted. `--old` holds the text as it
+currently appears in your items and `--new` the replacement; each file is trimmed, like
+the boilerplate at post time. (If you've already edited `boilerplate.txt`, save the
+previous version to another file for `--old`.)
+
+It prints the old and new text, scans the geeklist for your items, reads each one, and
+then prints every item's full new body (condition, price and all) for review. Items
+without the old text are listed in `skipped-boilerplate.csv`; items that already have the
+new text are left alone. Like the other commands it is a dry run unless you pass
+`--live`, which asks for confirmation before editing and re-checks each item right
+before saving. Use `--limit N` to try it on the first N items first. Flags: `--geeklist`,
+`--delay-ms`.
 
 ## Repricing items
 

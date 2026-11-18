@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEEKLIST, requireLogin, launchSession } from "./browser.mjs";
-import { scanOwnItems, matchRows, gotoItem, openEditor, cancelEditor, saveEditor, itemUrl } from "./geeklist.mjs";
+import { scanOwnItems, matchRows, gotoItem, openEditor, cancelEditor, saveEditor, readBody, itemUrl } from "./geeklist.mjs";
 import { isValidPrice, parsePriceLine, applyReprice } from "./markup.mjs";
 import { loadHistory, updatePrice } from "./history.mjs";
 
@@ -37,15 +37,6 @@ function parseArgs() {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Reads the item's body from its editor, then closes the editor without saving.
-async function readBody(page, geeklistUrl, itemId) {
-  const item = await gotoItem(page, geeklistUrl, itemId);
-  const { form, textarea } = await openEditor(item);
-  const body = await textarea.inputValue();
-  await cancelEditor(form);
-  return body;
-}
 
 async function main() {
   const opts = parseArgs();
