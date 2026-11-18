@@ -80,8 +80,8 @@ already-posted games don't trigger the disambiguation prompt. If a later run rea
 item that was already posted to the same geeklist, you're told when it was posted and
 can skip it, skip it and every other previously posted item for the rest of the run, or
 post it again. Pass `--skip-posted` to skip them all without being asked, so the same
-CSV can be re-run as-is (e.g. after adding rows or fixing skipped ones). Dry runs never
-write to the ledger. Delete an entry from `posted.json` (or the whole file) to forget it.
+CSV can be re-run as-is (e.g. after adding rows or fixing skipped ones). Dry runs of `post`
+never write to the ledger (`update-boilerplate` dry runs only note what they saw). Delete an entry from `posted.json` (or the whole file) to forget it.
 
 BGG doesn't say which item a Save created, so `post` looks up the new items' ids on the
 end of the list once the run is over (one lookup for the whole batch).
