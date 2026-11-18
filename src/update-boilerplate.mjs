@@ -1,5 +1,5 @@
 import { stringify } from "csv-stringify/sync";
-import { confirm } from "@inquirer/prompts";
+import { expand } from "@inquirer/prompts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -108,34 +108,49 @@ async function main() {
     if (plan.length > 0 && !opts.live) {
       console.log("\nDry run: nothing was edited.");
     } else if (plan.length > 0) {
-      const proceed = await confirm({ message: `\nEdit ${plan.length} live item(s) with the text above?`, default: false });
-      if (!proceed) {
-        console.log("Aborted.");
-      } else {
-        for (const p of plan) {
-          console.log(`\nEditing ${p.label}...`);
-          const item = await gotoItem(page, opts.geeklist, p.item.itemId);
-          const { form, textarea } = await openEditor(item);
-          if (lf(await textarea.inputValue()) !== p.body) {
-            console.log(`  The item changed since it was read. Skipping.`);
-            skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "item changed during the run" });
-            await cancelEditor(form);
+      console.log(`\nYou'll be asked before each edit: y = edit this item, n = skip it, a = edit it and all the rest without asking.`);
+      let all = false;
+      for (const p of plan) {
+        if (!all) {
+          // Enter alone means "no", so a stray keypress can't edit a live item.
+          const answer = await expand({
+            message: `Edit ${p.label}?`,
+            default: "n",
+            choices: [
+              { key: "y", name: "Yes, edit this item", value: "y" },
+              { key: "n", name: "No, skip this item", value: "n" },
+              { key: "a", name: "All: edit this and every remaining item without asking", value: "a" },
+            ],
+          });
+          if (answer === "n") {
+            console.log(`  Skipped.`);
+            skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "declined at the prompt" });
             continue;
           }
-          await textarea.fill(p.newBody);
-          // A fill can be lost if the form re-renders; never save unless it took.
-          await page.waitForTimeout(600);
-          if (lf(await textarea.inputValue()) !== p.newBody) {
-            console.log(`  The edit didn't take. Skipping.`);
-            skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "form did not keep the new text" });
-            await cancelEditor(form);
-            continue;
-          }
-          await saveEditor(form);
-          edited++;
-          console.log(`  Saved.`);
-          await sleep(opts.delayMs + Math.floor(Math.random() * 1500));
+          if (answer === "a") all = true;
         }
+        console.log(`\nEditing ${p.label}...`);
+        const item = await gotoItem(page, opts.geeklist, p.item.itemId);
+        const { form, textarea } = await openEditor(item);
+        if (lf(await textarea.inputValue()) !== p.body) {
+          console.log(`  The item changed since it was read. Skipping.`);
+          skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "item changed during the run" });
+          await cancelEditor(form);
+          continue;
+        }
+        await textarea.fill(p.newBody);
+        // A fill can be lost if the form re-renders; never save unless it took.
+        await page.waitForTimeout(600);
+        if (lf(await textarea.inputValue()) !== p.newBody) {
+          console.log(`  The edit didn't take. Skipping.`);
+          skipped.push({ itemId: p.item.itemId, title: p.item.title, reason: "form did not keep the new text" });
+          await cancelEditor(form);
+          continue;
+        }
+        await saveEditor(form);
+        edited++;
+        console.log(`  Saved.`);
+        await sleep(opts.delayMs + Math.floor(Math.random() * 1500));
       }
     }
 

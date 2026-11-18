@@ -137,8 +137,8 @@ It prints the old and new text, scans the geeklist for your items, reads each on
 then prints every item's full new body (condition, price and all) for review. Items
 without the old text are listed in `skipped-boilerplate.csv`; items that already have the
 new text are left alone. Like the other commands it is a dry run unless you pass
-`--live`, which asks for confirmation before editing and re-checks each item right
-before saving. Use `--limit N` to try it on just the first N items that need updating; it stops reading items once it has them. Flags: `--geeklist`,
+`--live`, which asks `y/n/a` before each edit (`a` edits that item and all the rest
+without asking; Enter alone means no) and re-checks each item right before saving. Use `--limit N` to try it on just the first N items that need updating; it stops reading items once it has them. Flags: `--geeklist`,
 `--delay-ms`.
 
 ## Repricing items
